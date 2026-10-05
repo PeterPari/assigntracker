@@ -1,0 +1,822 @@
+<title>Assignment Tracker</title>
+<style>
+/* Layout: one full-width column. Progress bar and toggles on top, compact 32px rows, a slim add bar under the list, trash pinned bottom-right. Dark only. */
+:root {
+  color-scheme: dark;
+  --bg: #13151a;
+  --row-hover: #1a1d24;
+  --raised: #232731;
+  --line: #22262e;
+  --line-2: #323844;
+  --text: #e7e9ee;
+  --muted: #98a0ad;
+  --ph: #7b8392;
+  --st-none: #8a92a0;
+  --st-prog: #f2c94c;
+  --st-done: #4cc38a;
+  --done-bg: rgba(76, 195, 138, .075);
+  --done-text: #8ea599;
+  --accent: #8ab4ff;
+  --accent-bg: rgba(138, 180, 255, .14);
+  --danger: #f0716a;
+  --danger-bg: #c93c35;
+  --bar-track: #22262e;
+  --bar-fill: #26774a;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13.5px/1.25 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
+input { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; min-width: 0; }
+input::placeholder { color: var(--ph); opacity: 1; }
+input:focus-visible { outline: none; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+svg { display: block; flex: none; }
+[hidden] { display: none !important; }
+
+#app { padding: 12px 14px 72px; }
+
+/* header: progress + toggles */
+.hd { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; align-items: center; gap: 6px; padding-bottom: 10px; background: var(--bg); }
+.bar { position: relative; flex: 1; height: 22px; border-radius: 6px; background: var(--bar-track); overflow: hidden; }
+.fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--bar-fill); transition: width .3s ease; }
+.pct { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; font-weight: 600; letter-spacing: .2px; color: #fff; font-variant-numeric: tabular-nums; }
+.ib { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 6px; color: var(--muted); }
+.ib:hover { background: var(--raised); color: var(--text); }
+.ib.on { color: var(--accent); background: var(--accent-bg); }
+.ib.warn { color: var(--st-prog); cursor: default; }
+
+/* rows */
+#list { display: flex; flex-direction: column; gap: 2px; }
+.row {
+  position: relative; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px;
+  border-radius: 6px; box-shadow: inset 0 -1px 0 var(--line);
+  transition: transform .16s ease, background-color .12s ease;
+  user-select: none; -webkit-user-select: none;
+}
+.row:hover { background: var(--row-hover); }
+.row.done { background: var(--done-bg); }
+.row.done:hover { background: rgba(76, 195, 138, .11); }
+.row.drag { transition: none; z-index: 4; background: var(--raised); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+body.dragging, body.dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+
+.st { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 50%; }
+.st:hover { background: rgba(255, 255, 255, .06); }
+.s0 .st { color: var(--st-none); }
+.s1 .st { color: var(--st-prog); }
+.s2 .st { color: var(--st-done); }
+
+.nm { flex: 1; min-width: 0; height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 5px; cursor: text; }
+.nm:focus-within { background: var(--raised); box-shadow: inset 0 0 0 1px var(--accent); }
+.nmi { width: 100%; text-overflow: ellipsis; pointer-events: none; user-select: text; -webkit-user-select: text; }
+.nm:focus-within .nmi { pointer-events: auto; }
+.row.done .nmi, .row.done .dv, .row.done .sv, .row.done .ec { color: var(--done-text); }
+
+.du { flex: none; display: flex; justify-content: flex-end; min-width: 108px; }
+.dv { display: none; height: 24px; padding: 0 6px; border-radius: 5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dv:hover, .sv:hover { background: var(--raised); }
+.row.has-dur:not(.ed-dur) .dv { display: block; }
+.de { display: none; align-items: center; gap: 3px; height: 24px; padding: 0 6px; border-radius: 5px; background: var(--raised); }
+.row.ed-dur .de, .row:not(.has-dur) .de { display: flex; }
+.de:focus-within, .se:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+.de input { width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+.u { color: var(--muted); }
+.u:nth-of-type(1) { margin-right: 5px; }
+
+.tm { display: none; flex: none; align-items: center; gap: 4px; }
+#list.times .tm { display: flex; }
+.sc { position: relative; display: flex; justify-content: flex-end; min-width: 72px; height: 24px; cursor: text; }
+.sg, .sv { display: none; height: 24px; padding: 0 6px; border-radius: 5px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sg { width: 72px; pointer-events: none; }
+.row:not(.has-start):not(.ed-start) .sg { display: block; }
+.row.has-start:not(.ed-start) .sv { display: block; }
+.row.derived .sv { color: var(--muted); }
+.row.pend .sv { color: var(--text); box-shadow: inset 0 0 0 1px var(--st-prog); }
+.se { display: none; align-items: center; height: 24px; padding: 0 4px 0 6px; border-radius: 5px; background: var(--raised); font-variant-numeric: tabular-nums; }
+.row.ed-start .se { display: flex; }
+.se input { width: 20px; text-align: center; }
+.co { color: var(--muted); }
+.sa { height: 18px; margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-bg); }
+.ec { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 92px; padding: 0 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ec.blank svg { visibility: hidden; }
+
+.rm { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
+.row:hover .rm, .rm:focus-visible { opacity: 1; }
+.rm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); }
+
+/* chaining warning popup, beside the start field */
+.pop { display: none; position: absolute; right: calc(100% + 10px); top: 50%; transform: translateY(-50%); z-index: 6; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+.pop::after { content: ""; position: absolute; left: 100%; top: 50%; width: 8px; height: 8px; margin-left: -5px; transform: translateY(-50%) rotate(45deg); background: var(--raised); border-top: 1px solid var(--line-2); border-right: 1px solid var(--line-2); }
+.row.pend .pop { display: flex; }
+.pop > * { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 5px; }
+.pw { color: var(--st-prog); }
+.pk { color: var(--st-done); }
+.px { color: var(--muted); }
+.pk:hover, .px:hover { background: rgba(255, 255, 255, .08); }
+
+/* add + clear */
+.add { display: flex; align-items: center; justify-content: center; width: 100%; height: 30px; margin-top: 6px; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--muted); }
+.add:hover { color: var(--text); background: var(--row-hover); }
+.clr { position: fixed; right: 12px; bottom: 12px; z-index: 5; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--raised); box-shadow: 0 0 0 1px var(--line-2); }
+.clr:hover { color: var(--text); }
+.clr.armed { color: #fff; background: var(--danger-bg); box-shadow: none; }
+.clr:disabled { opacity: .35; cursor: default; }
+
+/* tooltip */
+#tip { position: fixed; z-index: 50; left: 0; top: 0; padding: 4px 8px; border-radius: 5px; background: #0b0c0f; color: var(--text); border: 1px solid var(--line-2); font-size: 12px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s ease; }
+#tip.show { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div id="app">
+  <div class="hd">
+    <div class="bar" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i class="fill" id="fill"></i><b class="pct" id="pct">0%</b></div>
+    <span class="ib warn" id="warn" hidden data-tip="Not saved" role="img" aria-label="Not saved"></span>
+    <button class="ib" id="times" type="button"></button>
+    <button class="ib" id="chain" type="button" hidden></button>
+  </div>
+  <div id="list"></div>
+  <button class="add" id="add" type="button" data-tip="Add" aria-label="Add"></button>
+</div>
+<button class="clr" id="clear" type="button" aria-label="Clear"></button>
+<div id="tip" role="tooltip"></div>
+
+<script>
+/* <logic> */
+const DAY = 1440;
+const pad2 = (n) => String(n).padStart(2, '0');
+const mod = (t) => ((Math.round(t) % DAY) + DAY) % DAY;
+
+/** 150 -> "2 hrs 30 min"; empty units are dropped, "hr" is singular only for 1. */
+function fmtDur(total) {
+  const h = Math.floor(total / 60), m = total % 60, out = [];
+  if (h) out.push(h + (h === 1 ? ' hr' : ' hrs'));
+  if (m) out.push(m + ' min');
+  return out.join(' ');
+}
+
+/** Minutes since midnight (any integer, wraps past 24h) -> "3:30 PM". */
+function fmtClock(total) {
+  const t = mod(total), h24 = Math.floor(t / 60);
+  return (h24 % 12 || 12) + ':' + pad2(t % 60) + ' ' + (h24 < 12 ? 'AM' : 'PM');
+}
+
+/** Editor fields -> minutes since midnight, null when both are empty, undefined when invalid. 13-23 read as 24-hour. */
+function startFromParts(hStr, mStr, ap) {
+  hStr = String(hStr).trim(); mStr = String(mStr).trim();
+  if (hStr === '' && mStr === '') return null;
+  if (hStr === '') return undefined;
+  let h = Number(hStr); const m = mStr === '' ? 0 : Number(mStr);
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) return undefined;
+  let pm = ap === 'PM';
+  if (h > 12) { h -= 12; pm = true; } else if (h === 0) { h = 12; pm = false; }
+  return ((h % 12) + (pm ? 12 : 0)) * 60 + m;
+}
+
+/** A row exists only with both a name and a duration. */
+const isComplete = (r) => r.name.trim() !== '' && r.mins > 0;
+
+/** Start and end per row. Chained: row 0 owns the start, the rest follow the previous end. Unchained: each row uses only its own start. */
+function schedule(rows, chain) {
+  let cursor = null;
+  return rows.map((r, i) => {
+    const start = chain && i > 0 ? cursor : r.start;
+    const dur = r.mins > 0 ? r.mins : 0;
+    cursor = start == null ? null : start + dur;
+    return {
+      start: start == null ? null : mod(start),
+      end: start == null || !dur ? null : mod(start + dur),
+      derived: chain && i > 0,
+    };
+  });
+}
+
+/** Average of done-rows share and done-minutes share, in whole percent. In-progress counts as 0. */
+function progress(rows) {
+  const all = rows.filter(isComplete);
+  const n = all.length, m = all.reduce((a, r) => a + r.mins, 0);
+  if (!n || !m) return 0;
+  const done = all.filter((r) => r.status === 2);
+  const nd = done.length, md = done.reduce((a, r) => a + r.mins, 0);
+  if (nd === n) return 100;
+  return Math.min(99, Math.round(((nd / n + md / m) / 2) * 100));
+}
+
+const anchorOf = (rows) => (rows.length ? rows[0].start : null);
+/** Chained lists keep one start, in the first slot; every other own start is dropped. */
+const relink = (rows, anchor) => rows.map((r, i) => ({ ...r, start: i === 0 ? anchor : null }));
+const chainOn = (rows) => relink(rows, anchorOf(rows));
+
+function moveRow(rows, from, to, chain) {
+  if (from === to || from < 0 || to < 0 || from >= rows.length || to >= rows.length) return rows;
+  const anchor = anchorOf(rows), next = rows.slice(), [r] = next.splice(from, 1);
+  next.splice(to, 0, r);
+  return chain ? relink(next, anchor) : next;
+}
+
+function removeRow(rows, id, chain) {
+  const anchor = anchorOf(rows), next = rows.filter((r) => r.id !== id);
+  return chain ? relink(next, anchor) : next;
+}
+
+/** What goes into the shared database: finished rows only. */
+function serialize(s) {
+  const anchor = anchorOf(s.rows);
+  let rows = s.rows.filter(isComplete).map((r) => ({ id: r.id, name: r.name.trim(), mins: r.mins, status: r.status, start: r.start }));
+  if (s.chain) rows = relink(rows, anchor);
+  return { v: 1, rows, times: !!s.times, chain: !!s.chain };
+}
+
+function cleanRow(r) {
+  if (!r || typeof r.id !== 'string' || typeof r.name !== 'string') return null;
+  const mins = Math.floor(Number(r.mins));
+  if (!(mins > 0) || mins > 99999) return null;
+  const row = {
+    id: r.id,
+    name: r.name.slice(0, 200),
+    mins,
+    status: r.status === 1 || r.status === 2 ? r.status : 0,
+    start: Number.isInteger(r.start) && r.start >= 0 && r.start < DAY ? r.start : null,
+  };
+  return isComplete(row) ? row : null;
+}
+
+/** Stored document -> app state. Anything malformed is dropped. */
+function hydrate(d) {
+  const seen = new Set(); // shared data is untrusted: one row per id
+  const rows = Array.isArray(d && d.rows) ? d.rows.map(cleanRow).filter((r) => r && !seen.has(r.id) && seen.add(r.id)) : [];
+  const chain = !d || d.chain !== false;
+  return { rows: chain ? chainOn(rows) : rows, times: !!d && d.times === true, chain };
+}
+/* </logic> */
+
+(() => {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+  /* ---------- icons ---------- */
+  const P = {
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    x: '<path d="M6 6l12 12M18 6L6 18"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    unlink: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/><path d="M4 4l16 16"/>',
+    alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.4v.1"/>',
+    arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  };
+  const icon = (n, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
+  const STATUS = [
+    '<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><circle cx="9" cy="9" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+    '<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><circle cx="9" cy="9" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 2.4a6.6 6.6 0 0 1 0 13.2z" fill="currentColor"/></svg>',
+    '<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><circle cx="9" cy="9" r="7.5" fill="currentColor"/></svg>',
+  ];
+  const STATUS_TIP = ['Not started', 'In progress', 'Done'];
+
+  /* ---------- state ---------- */
+  const state = { rows: [], times: false, chain: true };
+  let pending = null;       // {id, value}: a lower-row start waiting on the chaining warning
+  let touched = false;      // local edits before the stored list arrived
+  let settingsTouched = false;
+  const els = new Map();
+  const rowOf = (id) => state.rows.find((r) => r.id === id);
+  const indexOf = (id) => state.rows.findIndex((r) => r.id === id);
+
+  const list = $('#list'), bar = $('#bar'), fill = $('#fill'), pctEl = $('#pct');
+  const tTimes = $('#times'), tChain = $('#chain'), tWarn = $('#warn'), addBtn = $('#add'), clr = $('#clear');
+  addBtn.innerHTML = icon('plus', 18);
+  tWarn.innerHTML = icon('alert', 17);
+  clr.innerHTML = icon('trash', 17);
+
+  /* ---------- rows ---------- */
+  const ROW_HTML = `
+    <button class="st" type="button"></button>
+    <div class="nm"><input class="nmi" type="text" maxlength="200" placeholder="Assignment" autocomplete="off" spellcheck="false" aria-label="Assignment"></div>
+    <div class="du">
+      <button class="dv" type="button" data-tip="Duration"></button>
+      <div class="de" data-tip="Duration">
+        <input class="dh" type="text" inputmode="numeric" maxlength="3" placeholder="0" autocomplete="off" aria-label="hr"><span class="u">hr</span>
+        <input class="dm" type="text" inputmode="numeric" maxlength="3" placeholder="0" autocomplete="off" aria-label="min"><span class="u">min</span>
+      </div>
+    </div>
+    <div class="tm">
+      <div class="sc" data-tip="Start">
+        <input class="sg" type="text" readonly placeholder="--:-- --" aria-label="Start">
+        <button class="sv" type="button"></button>
+        <div class="se">
+          <input class="sh" type="text" inputmode="numeric" maxlength="2" placeholder="--" autocomplete="off" aria-label="hr"><span class="co">:</span><input class="sn" type="text" inputmode="numeric" maxlength="2" placeholder="--" autocomplete="off" aria-label="min"><button class="sa" type="button">AM</button>
+        </div>
+        <div class="pop" role="alertdialog">
+          <span class="pw" data-tip="Chaining will be disabled" role="img" aria-label="Chaining will be disabled">${icon('unlink')}</span>
+          <button class="pk" type="button" data-tip="Confirm" aria-label="Confirm">${icon('check')}</button>
+          <button class="px" type="button" data-tip="Cancel" aria-label="Cancel">${icon('x')}</button>
+        </div>
+      </div>
+      <div class="ec" data-tip="End">${icon('arrow', 13)}<span class="ev"></span></div>
+    </div>
+    <button class="rm" type="button" data-tip="Delete" aria-label="Delete">${icon('x', 15)}</button>`;
+
+  function makeRow(id) {
+    const el = document.createElement('div');
+    el.className = 'row';
+    el.dataset.id = id;
+    el.innerHTML = ROW_HTML;
+    el._ed = null; // which inline editor is open: 'dur' | 'start' | null
+    return el;
+  }
+
+  function updateRow(el, r, s) {
+    el.className = el.className.replace(/\bs[012]\b/g, '').trim();
+    el.classList.add('s' + r.status);
+    el.classList.toggle('done', r.status === 2);
+    el.classList.toggle('has-dur', r.mins > 0);
+    el.classList.toggle('derived', s.derived);
+    const st = $('.st', el);
+    if (el._st !== r.status) { st.innerHTML = STATUS[r.status]; el._st = r.status; }
+    st.dataset.tip = STATUS_TIP[r.status];
+    st.setAttribute('aria-label', STATUS_TIP[r.status]);
+    const nmi = $('.nmi', el);
+    if (document.activeElement !== nmi) nmi.value = r.name;
+    $('.dv', el).textContent = fmtDur(r.mins);
+    const isPend = pending && pending.id === r.id;
+    const shown = isPend ? pending.value : s.start;
+    el.classList.toggle('pend', !!isPend);
+    el.classList.toggle('has-start', shown != null);
+    $('.sv', el).textContent = shown == null ? '' : fmtClock(shown);
+    $('.sg', el).placeholder = s.derived ? '' : '--:-- --';
+    $('.ev', el).textContent = s.end == null ? '' : fmtClock(s.end);
+    $('.ec', el).classList.toggle('blank', s.end == null);
+  }
+
+  function render() {
+    const sched = schedule(state.rows, state.chain);
+    const ids = new Set(state.rows.map((r) => r.id));
+    for (const [id, el] of els) if (!ids.has(id)) { el.remove(); els.delete(id); }
+    list.classList.toggle('times', state.times);
+    state.rows.forEach((r, i) => {
+      let el = els.get(r.id);
+      if (!el) { el = makeRow(r.id); els.set(r.id, el); }
+      updateRow(el, r, sched[i]);
+      if (list.children[i] !== el) list.insertBefore(el, list.children[i] || null);
+    });
+    const pct = progress(state.rows);
+    fill.style.width = pct + '%';
+    pctEl.textContent = pct + '%';
+    bar.setAttribute('aria-valuenow', pct);
+    tTimes.innerHTML = icon('clock', 17);
+    tTimes.classList.toggle('on', state.times);
+    tTimes.setAttribute('aria-pressed', String(state.times));
+    tTimes.dataset.tip = state.times ? 'Hide times' : 'Show times';
+    tTimes.setAttribute('aria-label', tTimes.dataset.tip);
+    tChain.hidden = !state.times;
+    tChain.innerHTML = icon(state.chain ? 'link' : 'unlink', 17);
+    tChain.classList.toggle('on', state.chain);
+    tChain.setAttribute('aria-pressed', String(state.chain));
+    tChain.dataset.tip = state.chain ? 'Chaining on' : 'Chaining off';
+    tChain.setAttribute('aria-label', tChain.dataset.tip);
+    clr.disabled = !state.rows.length;
+  }
+
+  function commit() { touched = true; render(); queueSave(); }
+  function patch(id, p) { state.rows = state.rows.map((r) => (r.id === id ? { ...r, ...p } : r)); commit(); }
+
+  /* ---------- name ---------- */
+  function commitName(el, viaEnter) {
+    const id = el.dataset.id, r = rowOf(id);
+    if (!r) return;
+    const inp = $('.nmi', el);
+    let v = inp.value.trim();
+    if (!v && isComplete(r)) v = r.name; // a finished row always keeps a name
+    inp.value = v;
+    if (v !== r.name) patch(id, { name: v });
+    if (viaEnter) {
+      if (!(rowOf(id).mins > 0)) $('.dh', el).focus(); else inp.blur();
+    }
+  }
+  function cancelName(el) {
+    const r = rowOf(el.dataset.id), inp = $('.nmi', el);
+    inp.value = r ? r.name : '';
+    inp.blur();
+  }
+
+  /* ---------- duration ---------- */
+  function openDur(el) {
+    const r = rowOf(el.dataset.id);
+    if (!r || el._ed) return;
+    $('.dh', el).value = r.mins >= 60 ? String(Math.floor(r.mins / 60)) : '';
+    $('.dm', el).value = r.mins % 60 ? String(r.mins % 60) : '';
+    el._ed = 'dur';
+    el.classList.add('ed-dur');
+    $('.dh', el).focus();
+    $('.dh', el).select();
+  }
+  function closeDur(el) {
+    el._ed = null;
+    el.classList.remove('ed-dur');
+    $('.dh', el).value = '';
+    $('.dm', el).value = '';
+  }
+  function commitDur(el, viaEnter) {
+    if (el._ed !== 'dur') return;
+    const id = el.dataset.id, r = rowOf(id);
+    const total = (Number($('.dh', el).value) || 0) * 60 + (Number($('.dm', el).value) || 0);
+    closeDur(el);
+    if (!r) return;
+    if (total > 0 && total !== r.mins) patch(id, { mins: total }); // 0 never replaces a real duration
+    else render();
+    if (viaEnter) {
+      const r2 = rowOf(id);
+      if (!r2.name.trim()) $('.nmi', el).focus();
+      else if (r2.mins > 0) $('.dv', el).focus();
+    }
+  }
+  function cancelDur(el) {
+    closeDur(el);
+    const r = rowOf(el.dataset.id);
+    if (r && r.mins > 0) $('.dv', el).focus(); else $('.dh', el).blur();
+  }
+
+  /* ---------- start time ---------- */
+  const setAp = (el, ap) => { $('.sa', el).textContent = ap; };
+  function openStart(el) {
+    const id = el.dataset.id, i = indexOf(id);
+    if (i < 0 || el._ed) return;
+    const t = schedule(state.rows, state.chain)[i].start;
+    $('.sh', el).value = t == null ? '' : String(Math.floor(t / 60) % 12 || 12);
+    $('.sn', el).value = t == null ? '' : pad2(t % 60);
+    setAp(el, t != null && t >= 720 ? 'PM' : 'AM');
+    el._ed = 'start';
+    el.classList.add('ed-start');
+    $('.sh', el).focus();
+    $('.sh', el).select();
+  }
+  function closeStart(el) {
+    el._ed = null;
+    el.classList.remove('ed-start');
+  }
+  function commitStart(el) {
+    if (el._ed !== 'start') return;
+    const id = el.dataset.id, i = indexOf(id);
+    const v = startFromParts($('.sh', el).value, $('.sn', el).value, $('.sa', el).textContent);
+    closeStart(el);
+    if (i < 0 || v === undefined) return;
+    const shown = schedule(state.rows, state.chain)[i].start;
+    if (v === shown) return;
+    if (state.chain && i > 0) {
+      // a lower row has no start of its own while chained: ask before turning chaining off
+      pending = { id, value: v };
+      render();
+      setTimeout(() => { const k = $('.pk', el); if (pending && pending.id === id && k) k.focus(); }, 0);
+      return;
+    }
+    patch(id, { start: v });
+  }
+  function confirmPending() {
+    if (!pending) return;
+    const { id, value } = pending;
+    pending = null;
+    settingsTouched = true;
+    state.chain = false;
+    state.rows = state.rows.map((r) => (r.id === id ? { ...r, start: value } : r));
+    commit();
+  }
+  function cancelPending() {
+    if (!pending) return;
+    pending = null;
+    render();
+  }
+
+  /* ---------- list events ---------- */
+  list.addEventListener('click', (e) => {
+    const el = e.target.closest('.row');
+    if (!el) return;
+    const id = el.dataset.id, t = e.target;
+    if (t.closest('.st')) { const r = rowOf(id); if (r) patch(id, { status: (r.status + 1) % 3 }); }
+    else if (t.closest('.rm')) { state.rows = removeRow(state.rows, id, state.chain); if (pending && pending.id === id) pending = null; commit(); }
+    else if (t.closest('.pk')) confirmPending();
+    else if (t.closest('.px')) cancelPending();
+    else if (t.closest('.sa')) setAp(el, $('.sa', el).textContent === 'AM' ? 'PM' : 'AM');
+    else if (t.closest('.nm')) { const i = $('.nmi', el); if (document.activeElement !== i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+    else if (t.closest('.du')) { if (!el._ed && el.classList.contains('has-dur')) openDur(el); }
+    else if (t.closest('.sc') && !t.closest('.pop')) { if (!el._ed && !(pending && pending.id === id)) openStart(el); }
+  });
+
+  list.addEventListener('focusin', (e) => {
+    const el = e.target.closest('.row');
+    if (!el) return;
+    if (e.target.closest('.de') && !el._ed) { el._ed = 'dur'; el.classList.add('ed-dur'); }
+  });
+
+  list.addEventListener('focusout', (e) => {
+    const el = e.target.closest('.row');
+    if (!el) return;
+    const to = e.relatedTarget;
+    if (e.target.matches('.nmi')) commitName(el, false);
+    else if (e.target.closest('.de')) { if (!(to && $('.de', el).contains(to))) commitDur(el, false); }
+    else if (e.target.closest('.se')) { if (!(to && $('.se', el).contains(to))) commitStart(el); }
+  });
+
+  list.addEventListener('keydown', (e) => {
+    const t = e.target, el = t.closest('.row');
+    if (!el) return;
+    if (t.matches('.sg')) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openStart(el); } // keyboard way into an empty start
+    } else if (t.matches('.nmi')) {
+      if (e.key === 'Enter') { e.preventDefault(); commitName(el, true); }
+      else if (e.key === 'Escape') cancelName(el);
+    } else if (t.closest('.de')) {
+      if (e.key === 'Enter') { e.preventDefault(); commitDur(el, true); }
+      else if (e.key === 'Escape') cancelDur(el);
+    } else if (t.closest('.se')) {
+      if (e.key === 'Enter') { e.preventDefault(); commitStart(el); }
+      else if (e.key === 'Escape') closeStart(el);
+      else if (/^[ap]$/i.test(e.key)) { e.preventDefault(); setAp(el, e.key.toLowerCase() === 'a' ? 'AM' : 'PM'); }
+      else if (e.key === ':' && t.matches('.sh')) { e.preventDefault(); $('.sn', el).focus(); $('.sn', el).select(); }
+    }
+  });
+
+  list.addEventListener('input', (e) => {
+    const t = e.target;
+    if (!t.matches('.dh, .dm, .sh, .sn')) return;
+    const clean = t.value.replace(/\D/g, '');
+    if (clean !== t.value) t.value = clean;
+    if (t.matches('.sh') && clean.length === 2) { // a full hour moves on to minutes
+      const n = $('.sn', t.closest('.row'));
+      n.focus(); n.select();
+    }
+  });
+
+  list.addEventListener('focusin', (e) => { if (e.target.matches('.dh, .dm, .sh, .sn')) e.target.select(); });
+  list.addEventListener('dragstart', (e) => e.preventDefault());
+
+  /* ---------- header, add, clear ---------- */
+  tTimes.addEventListener('click', () => { pending = null; settingsTouched = true; state.times = !state.times; commit(); });
+  tChain.addEventListener('click', () => {
+    pending = null;
+    settingsTouched = true;
+    state.chain = !state.chain;
+    if (state.chain) state.rows = chainOn(state.rows); // lower rows' own starts are discarded
+    commit();
+  });
+
+  function addRow() {
+    const last = state.rows[state.rows.length - 1];
+    if (last && !isComplete(last)) { // one unfinished row at a time
+      const el = els.get(last.id);
+      if (!last.name.trim()) $('.nmi', el).focus(); else $('.dh', el).focus();
+      return;
+    }
+    const r = { id: uid(), name: '', mins: 0, status: 0, start: null };
+    state.rows = state.rows.concat(r);
+    touched = true;
+    render();
+    const el = els.get(r.id);
+    el.scrollIntoView({ block: 'nearest' });
+    $('.nmi', el).focus();
+  }
+  addBtn.addEventListener('click', addRow);
+
+  let armed = false, armTimer = 0;
+  function arm() {
+    armed = true;
+    clr.classList.add('armed');
+    clr.dataset.tip = 'Click again to clear';
+    clr.setAttribute('aria-label', 'Click again to clear');
+    clearTimeout(armTimer);
+    armTimer = setTimeout(disarm, 4000);
+  }
+  function disarm() {
+    armed = false;
+    clearTimeout(armTimer);
+    clr.classList.remove('armed');
+    clr.dataset.tip = 'Clear all';
+    clr.setAttribute('aria-label', 'Clear all');
+  }
+  disarm();
+  clr.addEventListener('click', () => {
+    if (!state.rows.length) return;
+    if (!armed) { arm(); return; }
+    disarm();
+    pending = null;
+    state.rows = [];
+    commit();
+  });
+
+  document.addEventListener('pointerdown', (e) => {
+    if (pending && !e.target.closest('.pop')) cancelPending();
+    if (armed && !e.target.closest('#clear')) disarm();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (pending) cancelPending();
+    if (armed) disarm();
+  });
+
+  /* ---------- drag to reorder ---------- */
+  let track = null, drag = null, lastY = 0, raf = 0, suppressClick = false;
+
+  list.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const el = e.target.closest('.row');
+    if (!el || e.target.closest('input, .pop, .sa')) return;
+    track = { el, id: el.dataset.id, x: e.clientX, y: e.clientY, pid: e.pointerId };
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    if (!track || e.pointerId !== track.pid) return;
+    if (!drag) {
+      if (Math.hypot(e.clientX - track.x, e.clientY - track.y) < 5) return;
+      startDrag(e);
+    }
+    lastY = e.clientY;
+    moveDrag();
+  });
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+  window.addEventListener('click', (e) => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); suppressClick = false; } }, true);
+
+  function startDrag(e) {
+    hideTip();
+    const a = document.activeElement;
+    if (a && a !== document.body && a.blur) a.blur(); // commit any open inline edit first
+    if (pending) cancelPending();
+    const from = indexOf(track.id);
+    if (from < 0) { track = null; return; }
+    const rows = state.rows.map((r) => els.get(r.id));
+    const item = rows[from];
+    const gap = parseFloat(getComputedStyle(list).rowGap) || 0;
+    drag = { rows, from, to: from, item, pitch: item.offsetHeight + gap, tops: rows.map((r) => r.offsetTop), startY: e.clientY + window.scrollY };
+    lastY = e.clientY;
+    item.classList.add('drag');
+    document.body.classList.add('dragging');
+    try { item.setPointerCapture(e.pointerId); } catch (_) { /* optional */ }
+    if (window.getSelection) window.getSelection().removeAllRanges();
+    raf = requestAnimationFrame(autoScroll);
+  }
+
+  function moveDrag() {
+    const d = drag, n = d.rows.length;
+    const y = lastY + window.scrollY - d.startY;
+    const dy = Math.max(d.tops[0] - d.tops[d.from], Math.min(d.tops[n - 1] - d.tops[d.from], y));
+    d.item.style.transform = `translateY(${dy}px)`;
+    const to = Math.max(0, Math.min(n - 1, Math.round((d.tops[d.from] + dy - d.tops[0]) / d.pitch)));
+    d.to = to;
+    d.rows.forEach((r, j) => {
+      if (j === d.from) return;
+      let s = 0;
+      if (d.from < to && j > d.from && j <= to) s = -d.pitch;
+      else if (d.from > to && j >= to && j < d.from) s = d.pitch;
+      r.style.transform = s ? `translateY(${s}px)` : '';
+    });
+  }
+
+  function autoScroll() {
+    if (!drag) return;
+    const edge = 56;
+    let v = 0;
+    if (lastY < edge + 30) v = -Math.ceil((edge + 30 - lastY) / 4);
+    else if (lastY > window.innerHeight - edge) v = Math.ceil((lastY - (window.innerHeight - edge)) / 4);
+    if (v) { window.scrollBy(0, v); moveDrag(); }
+    raf = requestAnimationFrame(autoScroll);
+  }
+
+  function endDrag() {
+    track = null;
+    if (!drag) return;
+    cancelAnimationFrame(raf);
+    const d = drag;
+    drag = null;
+    suppressClick = true;
+    setTimeout(() => { suppressClick = false; }, 0);
+    // FLIP: remember where everything is, apply the new order, then slide each row from the old spot.
+    const before = new Map(d.rows.map((r) => [r, r.getBoundingClientRect().top]));
+    d.rows.forEach((r) => { r.style.transition = 'none'; r.style.transform = ''; });
+    d.item.classList.remove('drag');
+    document.body.classList.remove('dragging');
+    if (d.to !== d.from) { state.rows = moveRow(state.rows, d.from, d.to, state.chain); commit(); }
+    d.rows.forEach((r) => {
+      const dy = before.get(r) - r.getBoundingClientRect().top;
+      if (Math.abs(dy) > 0.5) r.style.transform = `translateY(${dy}px)`;
+    });
+    void list.offsetHeight;
+    d.rows.forEach((r) => { r.style.transition = ''; r.style.transform = ''; });
+  }
+
+  /* ---------- tooltips: long hover only ---------- */
+  const tip = $('#tip');
+  let tipTimer = 0, tipTarget = null;
+  function showTip(t) {
+    const text = t.dataset.tip;
+    if (!text) return;
+    tip.textContent = text;
+    const r = t.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    const x = Math.max(6, Math.min(window.innerWidth - w - 6, r.left + r.width / 2 - w / 2));
+    let y = r.bottom + 8;
+    if (y + h > window.innerHeight - 6) y = r.top - h - 8;
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+    tip.classList.add('show');
+  }
+  function hideTip() {
+    clearTimeout(tipTimer);
+    tipTimer = 0;
+    tipTarget = null;
+    tip.classList.remove('show');
+  }
+  function armTip(t) {
+    if (t === tipTarget) return;
+    hideTip();
+    if (!t) return;
+    tipTarget = t;
+    tipTimer = setTimeout(() => showTip(t), 800);
+  }
+  document.addEventListener('pointerover', (e) => armTip(e.target.closest && e.target.closest('[data-tip]')));
+  document.documentElement.addEventListener('pointerleave', hideTip);
+  document.addEventListener('pointerdown', hideTip, true);
+  document.addEventListener('keydown', hideTip, true);
+  window.addEventListener('scroll', hideTip, true);
+  document.addEventListener('focusin', (e) => {
+    const t = e.target.closest && e.target.closest('[data-tip]');
+    if (t && e.target.matches(':focus-visible')) armTip(t);
+  });
+  document.addEventListener('focusout', hideTip);
+
+  /* ---------- shared database ---------- */
+  let ref = null, canSave = false, saveTimer = 0, inflight = false, retried = false, lastJson = '';
+  const setWarn = (on) => { tWarn.hidden = !on; };
+
+  function queueSave() {
+    if (!canSave) return;
+    if (JSON.stringify(serialize(state)) === lastJson) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flush, 400);
+  }
+
+  async function flush() {
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    if (inflight || !canSave) return;
+    inflight = true;
+    try {
+      for (;;) {
+        const data = serialize(state), json = JSON.stringify(data);
+        if (json === lastJson) break;
+        try {
+          await ref.set(data);
+          lastJson = json;
+          retried = false;
+          setWarn(false);
+        } catch (err) {
+          if (err && err.code === 'unavailable' && !retried) { retried = true; await sleep(500 + Math.random() * 700); continue; }
+          setWarn(true);
+          break;
+        }
+      }
+    } finally { inflight = false; }
+  }
+
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && saveTimer) flush(); });
+  window.addEventListener('pagehide', () => { if (saveTimer) flush(); });
+
+  async function load() {
+    let db = null;
+    try { db = window.claude && window.claude.use ? await window.claude.use('db') : null; } catch (_) { db = null; }
+    if (!db) { setWarn(true); return; }
+    let snap = null;
+    try {
+      ref = db.doc('tracker/list');
+      for (let a = 0; a < 2 && !snap; a++) {
+        try { snap = await ref.get(); } catch (err) { if (a === 0 && err && err.code === 'unavailable') await sleep(600); else break; }
+      }
+    } catch (_) { snap = null; }
+    if (!snap) { setWarn(true); return; } // never write over a list that could not be read
+    const remote = snap.exists ? hydrate(snap.data()) : { rows: [], times: false, chain: true };
+    if (touched) {
+      const mine = state.rows.filter((r) => !remote.rows.some((x) => x.id === r.id));
+      if (!settingsTouched) { state.times = remote.times; state.chain = remote.chain; }
+      state.rows = remote.rows.concat(mine);
+      if (state.chain) state.rows = chainOn(state.rows);
+    } else {
+      state.rows = remote.rows; state.times = remote.times; state.chain = remote.chain;
+    }
+    lastJson = JSON.stringify(serialize(remote));
+    canSave = true;
+    render();
+    queueSave();
+  }
+
+  render();
+  load();
+})();
+</script>

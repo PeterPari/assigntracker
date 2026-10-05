@@ -1,0 +1,15 @@
+{
+  "name": "assigntracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Single-page assignment tracker, published as a Claude Artifact.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/logic.test.mjs tests/e2e.test.mjs",
+    "test:logic": "node --test tests/logic.test.mjs",
+    "test:e2e": "node --test tests/e2e.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}
