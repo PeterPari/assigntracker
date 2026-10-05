@@ -6,7 +6,7 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtClock, startFromParts, durationFromEnd, isComplete, schedule, progress, moveRow, removeRow, chainOn, relink, serialize, hydrate, cleanRow };`)();
+const L = new Function(`${block}; return { fmtDur, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, relink, serialize, hydrate, cleanRow };`)();
 
 const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, ...o });
 const H = (h, m = 0) => h * 60 + m;
@@ -165,4 +165,13 @@ test('durationFromEnd: minutes forward from the start, wrapping past midnight', 
   assert.equal(L.durationFromEnd(H(9), H(9)), null, 'zero is not a duration');
   assert.equal(L.durationFromEnd(null, H(9)), null);
   assert.equal(L.durationFromEnd(H(9), null), null);
+});
+
+test('durationOnDone: finishing now sets start-to-now, and keeps the plan when finished early', () => {
+  assert.equal(L.durationOnDone(H(9), H(9, 40)), 40);
+  assert.equal(L.durationOnDone(H(23, 30), H(0, 10)), 40, 'past midnight');
+  assert.equal(L.durationOnDone(H(9), H(21)), 720, 'exactly 12 hours is still a real duration');
+  assert.equal(L.durationOnDone(H(15), H(13)), null, 'start is 2 hours ahead: finished early, keep the plan');
+  assert.equal(L.durationOnDone(H(9), H(9)), null, 'same minute: nothing to record');
+  assert.equal(L.durationOnDone(null, H(9)), null);
 });

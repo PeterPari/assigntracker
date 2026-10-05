@@ -221,6 +221,13 @@ function durationFromEnd(start, end) {
   return d === 0 ? null : d;
 }
 
+/** Marking a row done records when it finished: the duration becomes start-to-now. A start more than 12 hours ahead of now
+ *  means the row was finished early, so the planned duration is kept (null). */
+function durationOnDone(start, now) {
+  const d = durationFromEnd(start, now);
+  return d != null && d <= 720 ? d : null;
+}
+
 const anchorOf = (rows) => (rows.length ? rows[0].start : null);
 /** Chained lists keep one start, in the first slot; every other own start is dropped. */
 const relink = (rows, anchor) => rows.map((r, i) => ({ ...r, start: i === 0 ? anchor : null }));
@@ -548,12 +555,25 @@ function hydrate(d) {
     render();
   }
 
+  /* ---------- status ---------- */
+  function statusPatch(r) {
+    const status = (r.status + 1) % 3, p = { status };
+    if (status === 2 && state.times) { // finishing now: the visible end time becomes the current time
+      const s = schedule(state.rows, state.chain)[indexOf(r.id)];
+      if (s.end != null) {
+        const now = new Date(), d = durationOnDone(s.start, now.getHours() * 60 + now.getMinutes());
+        if (d != null) p.mins = d;
+      }
+    }
+    return p;
+  }
+
   /* ---------- list events ---------- */
   list.addEventListener('click', (e) => {
     const el = e.target.closest('.row');
     if (!el) return;
     const id = el.dataset.id, t = e.target;
-    if (t.closest('.st')) { const r = rowOf(id); if (r) patch(id, { status: (r.status + 1) % 3 }); }
+    if (t.closest('.st')) { const r = rowOf(id); if (r) patch(id, statusPatch(r)); }
     else if (t.closest('.rm')) { state.rows = removeRow(state.rows, id, state.chain); if (pending && pending.id === id) pending = null; commit(); }
     else if (t.closest('.pk')) confirmPending();
     else if (t.closest('.px')) cancelPending();
