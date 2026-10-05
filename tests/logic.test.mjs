@@ -6,7 +6,7 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, relink, serialize, hydrate, cleanRow };`)();
+const L = new Function(`${block}; return { fmtDur, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow };`)();
 
 const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, ...o });
 const H = (h, m = 0) => h * 60 + m;
@@ -65,9 +65,21 @@ test('schedule, chained: lower starts follow the previous end', () => {
   assert.deepEqual(s.map((x) => x.end), [H(9, 30), H(11), H(11, 45)]);
   assert.deepEqual(s.map((x) => x.derived), [false, true, true]);
 });
-test('schedule, chained: no first start means everything is blank', () => {
-  const s = L.schedule([row('a', 30), row('b', 90, { start: H(10) })], true);
-  assert.deepEqual(s.map((x) => [x.start, x.end]), [[null, null], [null, null]], 'a lower row own start is ignored');
+test('schedule, chained: no first start means the rows above any cut are blank', () => {
+  const s = L.schedule([row('a', 30), row('b', 90), row('c', 45)], true);
+  assert.deepEqual(s.map((x) => [x.start, x.end]), [[null, null], [null, null], [null, null]]);
+});
+test('schedule, chained: a row with its own start cuts the chain before it and the rows after continue from it', () => {
+  const rows = [row('a', 60, { start: H(9) }), row('b', 60, { start: H(10, 35) }), row('c', 30)];
+  const s = L.schedule(rows, true);
+  assert.deepEqual(s.map((x) => x.start), [H(9), H(10, 35), H(11, 35)]);
+  assert.deepEqual(s.map((x) => x.end), [H(10), H(11, 35), H(12, 5)]);
+  assert.deepEqual(s.map((x) => x.derived), [false, false, true]);
+});
+test('schedule, chained: a cut works even when the first row has no start', () => {
+  const s = L.schedule([row('a', 30), row('b', 90, { start: H(10) }), row('c', 45)], true);
+  assert.deepEqual(s.map((x) => x.start), [null, H(10), H(11, 30)]);
+  assert.deepEqual(s.map((x) => x.end), [null, H(11, 30), H(12, 15)]);
 });
 test('schedule, chained: end past midnight is plain clock time', () => {
   const s = L.schedule([row('a', H(2), { start: H(23, 15) }), row('b', H(1))], true);
@@ -147,9 +159,9 @@ test('hydrate round-trips and defends against bad data', () => {
   assert.equal(h.times, false);
   assert.deepEqual(L.hydrate(undefined), { rows: [], times: false, chain: true });
 });
-test('hydrate drops lower starts when the stored list is chained', () => {
+test('hydrate keeps the starts that cut a chained list', () => {
   const h = L.hydrate({ chain: true, rows: [row('a', 30, { start: H(9) }), row('b', 30, { start: H(10) })] });
-  assert.deepEqual(h.rows.map((r) => r.start), [H(9), null]);
+  assert.deepEqual(h.rows.map((r) => r.start), [H(9), H(10)]);
 });
 test('hydrate keeps one row per id and caps name length', () => {
   const h = L.hydrate({ rows: [row('x', 10), row('x', 20), { ...row('long', 5), name: 'n'.repeat(500) }] });
@@ -174,4 +186,38 @@ test('durationOnDone: finishing now sets start-to-now, and keeps the plan when f
   assert.equal(L.durationOnDone(H(15), H(13)), null, 'start is 2 hours ahead: finished early, keep the plan');
   assert.equal(L.durationOnDone(H(9), H(9)), null, 'same minute: nothing to record');
   assert.equal(L.durationOnDone(null, H(9)), null);
+});
+
+test('moveRow chained: an unstarted first row keeps its plan in the first slot', () => {
+  const rows = [row('a', 30, { start: H(9) }), row('b', 30), row('c', 30)];
+  assert.deepEqual(L.moveRow(rows, 0, 2, true).map((r) => [r.id, r.start]), [['b', H(9)], ['c', null], ['a', null]]);
+  assert.deepEqual(L.moveRow(rows, 2, 1, true).map((r) => [r.id, r.start]), [['a', H(9)], ['c', null], ['b', null]]);
+});
+test('moveRow chained: a started row keeps its own start wherever it goes', () => {
+  const rows = [row('a', 30, { start: H(9, 10), status: 1 }), row('b', 30), row('c', 30, { start: H(11), status: 1 })];
+  // an unstarted row goes on top of a started one: the started row keeps 9:10, the top row has no start
+  assert.deepEqual(L.moveRow(rows, 1, 0, true).map((r) => [r.id, r.start]), [['b', null], ['a', H(9, 10)], ['c', H(11)]]);
+  // a started row with its own start moves down: nothing changes hands
+  assert.deepEqual(L.moveRow(rows, 2, 1, true).map((r) => [r.id, r.start]), [['a', H(9, 10)], ['c', H(11)], ['b', null]]);
+});
+test('moveRow chained: a plan is dropped when a started row takes the top', () => {
+  const rows = [row('a', 30, { start: H(9) }), row('b', 30, { start: H(10), status: 1 })];
+  assert.deepEqual(L.moveRow(rows, 1, 0, true).map((r) => [r.id, r.start]), [['b', H(10)], ['a', null]]);
+});
+test('removeRow chained: the plan moves to the next row; a started first row takes its start with it', () => {
+  const plan = [row('a', 30, { start: H(9) }), row('b', 30), row('c', 30, { start: H(11), status: 1 })];
+  assert.deepEqual(L.removeRow(plan, 'a', true).map((r) => [r.id, r.start]), [['b', H(9)], ['c', H(11)]]);
+  const started = [row('a', 30, { start: H(9), status: 2 }), row('b', 30)];
+  assert.deepEqual(L.removeRow(started, 'a', true).map((r) => [r.id, r.start]), [['b', null]]);
+  const lower = [row('a', 30, { start: H(9) }), row('b', 30, { start: H(10), status: 1 }), row('c', 30)];
+  assert.deepEqual(L.removeRow(lower, 'b', true).map((r) => [r.id, r.start]), [['a', H(9)], ['c', null]]);
+});
+test('moveRow and removeRow unchained never touch starts', () => {
+  const rows = [row('a', 30, { start: H(9) }), row('b', 30, { start: H(10) }), row('c', 30)];
+  assert.deepEqual(L.moveRow(rows, 0, 2, false).map((r) => [r.id, r.start]), [['b', H(10)], ['c', null], ['a', H(9)]]);
+  assert.deepEqual(L.removeRow(rows, 'a', false).map((r) => [r.id, r.start]), [['b', H(10)], ['c', null]]);
+});
+test('serialize keeps cuts in a chained list', () => {
+  const state = { chain: true, times: true, rows: [row('a', 30, { start: H(9) }), row('b', 30, { start: H(10, 35), status: 1 }), row('c', 30)] };
+  assert.deepEqual(L.serialize(state).rows.map((r) => r.start), [H(9), H(10, 35), null]);
 });

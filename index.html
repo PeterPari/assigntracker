@@ -188,17 +188,19 @@ function startFromParts(hStr, mStr, ap) {
 /** A row exists only with both a name and a duration. */
 const isComplete = (r) => r.name.trim() !== '' && r.mins > 0;
 
-/** Start and end per row. Chained: row 0 owns the start, the rest follow the previous end. Unchained: each row uses only its own start. */
+/** Start and end per row. Chained: a row follows the previous end unless it has a start of its own, which cuts the chain
+ *  there; the rows after it continue from its end. Unchained: each row uses only its own start. */
 function schedule(rows, chain) {
   let cursor = null;
   return rows.map((r, i) => {
-    const start = chain && i > 0 ? cursor : r.start;
+    const derived = chain && i > 0 && r.start == null;
+    const start = derived ? cursor : r.start;
     const dur = r.mins > 0 ? r.mins : 0;
     cursor = start == null ? null : start + dur;
     return {
       start: start == null ? null : mod(start),
       end: start == null || !dur ? null : mod(start + dur),
-      derived: chain && i > 0,
+      derived,
     };
   });
 }
@@ -228,28 +230,33 @@ function durationOnDone(start, now) {
   return d != null && d <= 720 ? d : null;
 }
 
-const anchorOf = (rows) => (rows.length ? rows[0].start : null);
-/** Chained lists keep one start, in the first slot; every other own start is dropped. */
-const relink = (rows, anchor) => rows.map((r, i) => ({ ...r, start: i === 0 ? anchor : null }));
-const chainOn = (rows) => relink(rows, anchorOf(rows));
+/** Turning chaining on: every lower row's own start is discarded and the list follows the first row. */
+const chainOn = (rows) => rows.map((r, i) => (i === 0 || r.start == null ? r : { ...r, start: null }));
+
+/** Chained: while the first row is not started, its start is the plan for the whole list and stays in the first slot when
+ *  another row takes that place. A started row keeps its own start wherever it goes. */
+function keepPlan(next, old) {
+  if (!old || old.status !== 0 || old.start == null || !next.length || next[0].id === old.id) return next;
+  return next.map((r, i) => (r.id === old.id ? { ...r, start: null } : i === 0 && r.start == null ? { ...r, start: old.start } : r));
+}
 
 function moveRow(rows, from, to, chain) {
   if (from === to || from < 0 || to < 0 || from >= rows.length || to >= rows.length) return rows;
-  const anchor = anchorOf(rows), next = rows.slice(), [r] = next.splice(from, 1);
+  const next = rows.slice(), [r] = next.splice(from, 1);
   next.splice(to, 0, r);
-  return chain ? relink(next, anchor) : next;
+  return chain ? keepPlan(next, rows[0]) : next;
 }
 
 function removeRow(rows, id, chain) {
-  const anchor = anchorOf(rows), next = rows.filter((r) => r.id !== id);
-  return chain ? relink(next, anchor) : next;
+  const next = rows.filter((r) => r.id !== id);
+  return chain ? keepPlan(next, rows[0]) : next;
 }
 
 /** What goes into the shared database: finished rows only. */
 function serialize(s) {
-  const anchor = anchorOf(s.rows);
-  let rows = s.rows.filter(isComplete).map((r) => ({ id: r.id, name: r.name.trim(), mins: r.mins, status: r.status, start: r.start }));
-  if (s.chain) rows = relink(rows, anchor);
+  const rows = s.rows.filter(isComplete).map((r) => ({ id: r.id, name: r.name.trim(), mins: r.mins, status: r.status, start: r.start }));
+  const head = s.rows[0]; // an unfinished first row hands its start to the first saved row
+  if (s.chain && head && !isComplete(head) && head.start != null && rows.length && rows[0].start == null) rows[0] = { ...rows[0], start: head.start };
   return { v: 1, rows, times: !!s.times, chain: !!s.chain };
 }
 
@@ -272,7 +279,7 @@ function hydrate(d) {
   const seen = new Set(); // shared data is untrusted: one row per id
   const rows = Array.isArray(d && d.rows) ? d.rows.map(cleanRow).filter((r) => r && !seen.has(r.id) && seen.add(r.id)) : [];
   const chain = !d || d.chain !== false;
-  return { rows: chain ? chainOn(rows) : rows, times: !!d && d.times === true, chain };
+  return { rows, times: !!d && d.times === true, chain };
 }
 /* </logic> */
 
@@ -507,8 +514,8 @@ function hydrate(d) {
     if (i < 0 || v === undefined) return;
     const shown = schedule(state.rows, state.chain)[i].start;
     if (v === shown) return;
-    if (state.chain && i > 0) {
-      // a lower row has no start of its own while chained: ask before turning chaining off
+    if (state.chain && i > 0 && state.rows[i].start == null) {
+      // a chained lower row that follows the row above has no start of its own: ask before turning chaining off
       pending = { id, value: v };
       render();
       setTimeout(() => { const k = $('.pk', el); if (pending && pending.id === id && k) k.focus(); }, 0);
@@ -561,8 +568,8 @@ function hydrate(d) {
     const status = (r.status + 1) % 3, p = { status };
     if (!state.times) return p; // times hidden: nothing time-related is recorded
     const i = indexOf(r.id);
-    if (status === 1 && (!state.chain || i === 0)) {
-      // starting now: the start becomes the current time. A chained lower row has no start of its own; it follows the row above.
+    if (status === 1) {
+      // starting now: the start becomes the current time. Chained, this cuts the chain before the row; the rows after it follow its end.
       p.start = nowMins();
     } else if (status === 2) {
       // finishing now: the visible end time becomes the current time

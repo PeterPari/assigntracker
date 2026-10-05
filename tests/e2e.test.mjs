@@ -810,11 +810,12 @@ test('done: the end time fills in with the current time and stays editable', asy
   });
 });
 
-test('done: a chained lower row records its finish from its computed start', async () => {
+test('done: a chained lower row records its finish from its start', async () => {
   const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30)];
-  await withPage({ initial: doc(rows, { times: true }), now: [10, 25] }, async (page) => {
-    await page.click('.row:nth-child(2) .st');
-    await page.click('.row:nth-child(2) .st'); // row b starts 10:00 AM, done 10:25 AM
+  await withPage({ initial: doc(rows, { times: true }), now: [10, 0] }, async (page) => {
+    await page.click('.row:nth-child(2) .st'); // in progress at 10:00 AM
+    await setNow(page, 10, 25);
+    await page.click('.row:nth-child(2) .st'); // done at 10:25 AM
     assert.deepEqual(await rowsText(page, '.dv'), ['1 hr', '25 min', '30 min']);
     assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM', '10:25 AM', '10:55 AM']);
     assert.equal(await page.getAttribute('#chain', 'aria-pressed'), 'true');
@@ -912,14 +913,121 @@ test('in progress: a blank first start gets filled and the whole chain appears',
   });
 });
 
-test('in progress: a chained lower row keeps following the row above, and chaining stays on', async () => {
-  const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 30)];
-  await withPage({ initial: doc(rows, { times: true }), now: [9, 20] }, async (page) => {
+test('in progress with chaining: the row cuts the chain before it and the rows after continue from it', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30), R('d', 'd', 30)];
+  await withPage({ initial: doc(rows, { times: true }), now: [10, 35] }, async (page) => {
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:00 AM', '11:00 AM', '11:30 AM']);
+    await page.click('.row:nth-child(2) .st'); // in progress at 10:35 AM
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:35 AM', '11:35 AM', '12:05 PM'], 'rows after follow the new start');
+    assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM', '11:35 AM', '12:05 PM', '12:35 PM'], 'the row before keeps its own end');
+    assert.deepEqual(await rowsText(page, '.dv'), ['1 hr', '1 hr', '30 min', '30 min']);
+    assert.equal(await page.getAttribute('#chain', 'aria-pressed'), 'true', 'chaining stays on');
+    assert.equal(await page.locator('.pop:visible').count(), 0, 'no warning popup');
+    // the stamped start reads as an entered value, the rest as followed values
+    const muted = await page.$$eval('.row .sv', (b) => b.map((x) => getComputedStyle(x).color));
+    assert.equal(muted[1], muted[0]);
+    assert.notEqual(muted[2], muted[1]);
+    await settle(page);
+    const s = await saved(page);
+    assert.equal(s.chain, true);
+    assert.deepEqual(s.rows.map((r) => r.start), [H(9), H(10, 35), null, null]);
+  });
+});
+
+test('in progress with chaining: finishing it then records the real time and the chain keeps going', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30)];
+  await withPage({ initial: doc(rows, { times: true }), now: [10, 35] }, async (page) => {
     await page.click('.row:nth-child(2) .st');
-    assert.equal(await page.getAttribute('.row:nth-child(2) .st', 'data-tip'), 'In progress');
-    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:00 AM']);
-    assert.equal(await page.getAttribute('#chain', 'aria-pressed'), 'true');
+    await setNow(page, 11, 5);
+    await page.click('.row:nth-child(2) .st'); // done at 11:05 AM
+    assert.deepEqual(await rowsText(page, '.dv'), ['1 hr', '30 min', '30 min']);
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:35 AM', '11:05 AM']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM', '11:05 AM', '11:35 AM']);
+  });
+});
+
+test('in progress with chaining: works with no first start, and the first row can be cut too', async () => {
+  await withPage({ initial: doc([R('a', 'a', 30), R('b', 'b', 30), R('c', 'c', 30)], { times: true }), now: [14, 0] }, async (page) => {
+    await page.click('.row:nth-child(2) .st');
+    assert.deepEqual(await rowsText(page, '.sv'), ['', '2:00 PM', '2:30 PM']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['', '2:30 PM', '3:00 PM']);
+    await setNow(page, 14, 40);
+    await page.click('.row:nth-child(3) .st');
+    assert.deepEqual(await rowsText(page, '.sv'), ['', '2:00 PM', '2:40 PM']);
+  });
+});
+
+test('a stamped start can be edited directly while chained (no popup); clearing it rejoins the chain', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30)];
+  await withPage({ initial: doc(rows, { times: true }), now: [10, 35] }, async (page) => {
+    await page.click('.row:nth-child(2) .st');
+    await page.click('.row:nth-child(2) .sc');
+    await page.keyboard.type('10:30');
+    await page.keyboard.press('Enter');
     assert.equal(await page.locator('.pop:visible').count(), 0);
+    assert.equal(await page.getAttribute('#chain', 'aria-pressed'), 'true');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:30 AM', '11:30 AM']);
+    await page.click('.row:nth-child(2) .sc');
+    await page.fill('.row:nth-child(2) .sh', '');
+    await page.fill('.row:nth-child(2) .sn', '');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:00 AM', '11:00 AM'], 'no own start: follows the row above again');
+    // a row that follows still asks before it is edited
+    await page.click('.row:nth-child(3) .sc');
+    await page.keyboard.type('5:00');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('.row:nth-child(3) .pop').isVisible(), true);
+  });
+});
+
+test('cuts survive a reload, and turning chaining off and on again discards them', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30)];
+  await withPage({ initial: doc(rows, { times: true }), now: [10, 35] }, async (page) => {
+    await page.click('.row:nth-child(2) .st');
+    await settle(page);
+    const stored = await saved(page);
+    const { ctx, page: other } = await openPage(browser, { initial: { 'tracker/list': stored } });
+    try {
+      assert.deepEqual(await rowsText(other, '.sv'), ['9:00 AM', '10:35 AM', '11:35 AM']);
+    } finally { await ctx.close(); }
+    await page.click('#chain'); // off: every row has only its own start
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:35 AM', '']);
+    await page.click('#chain'); // on: lower starts discarded, recomputed from the first row
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:00 AM', '11:00 AM']);
+  });
+});
+
+test('reordering keeps a started row\'s start; an unstarted plan stays in the first slot', async () => {
+  const dragTo = async (page, from, to) => {
+    const a = await page.locator(`.row:nth-child(${from})`).boundingBox();
+    const b = await page.locator(`.row:nth-child(${to})`).boundingBox();
+    await page.mouse.move(a.x + 300, a.y + a.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(a.x + 300, a.y + (to < from ? -14 : 14), { steps: 4 });
+    await page.mouse.move(a.x + 300, b.y + b.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+  };
+  const started = [R('a', 'a', 30, { start: H(9, 10), status: 1 }), R('b', 'b', 30), R('c', 'c', 30)];
+  await withPage({ initial: doc(started, { times: true }) }, async (page) => {
+    await dragTo(page, 3, 1);
+    assert.deepEqual(await names(page), ['c', 'a', 'b']);
+    assert.deepEqual(await rowsText(page, '.sv'), ['', '9:10 AM', '9:40 AM'], 'the started row keeps 9:10; the new top row has none');
+  });
+  const plan = [R('a', 'a', 30, { start: H(9) }), R('b', 'b', 30), R('c', 'c', 30)];
+  await withPage({ initial: doc(plan, { times: true }) }, async (page) => {
+    await dragTo(page, 3, 1);
+    assert.deepEqual(await names(page), ['c', 'a', 'b']);
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '9:30 AM', '10:00 AM'], 'the plan stays in the first slot');
+  });
+});
+
+test('deleting a cut row lets the rows after it follow the row before', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 60, { start: H(10, 35), status: 1 }), R('c', 'c', 30)];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    await page.hover('.row:nth-child(2)');
+    await page.click('.row:nth-child(2) .rm');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:00 AM']);
   });
 });
 
