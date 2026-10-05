@@ -293,30 +293,53 @@ test('start editor: AM/PM toggle, 24-hour entry, Esc cancels, clearing removes t
   });
 });
 
-test('chained: editing a lower start opens a popup; cancel changes nothing; confirm turns chaining off', async () => {
+const editLowerStart = async (page, n, text, ap) => {
+  await page.click(`.row:nth-child(${n}) .sc`);
+  await page.keyboard.type(text);
+  if (ap) await page.keyboard.press(ap);
+  await page.keyboard.press('Enter');
+};
+
+test('chained: editing a following row start opens a popup with two choices and a cancel', async () => {
   const rows = [R('a', 'a', 30, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30)];
   await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
     const popVisible = () => page.locator('.row:nth-child(2) .pop').isVisible();
     assert.equal(await page.locator('#chain').getAttribute('aria-pressed'), 'true');
-    await page.click('.row:nth-child(2) .sc');
-    await page.keyboard.type('2:00');
-    await page.keyboard.press('p');
-    await page.keyboard.press('Enter');
+    await editLowerStart(page, 2, '2:00', 'p');
     assert.equal(await popVisible(), true);
-    assert.equal(await page.locator('.row:nth-child(2) .pop button').count(), 2, 'confirm and cancel');
-    assert.equal(await page.getAttribute('.row:nth-child(2) .pw', 'data-tip'), 'Chaining will be disabled');
+    assert.deepEqual(await page.$$eval('.row:nth-child(2) .pop button', (b) => b.map((x) => x.dataset.tip)), ['Cut and continue', 'Disable chaining', 'Cancel']);
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'pc', 'the choice that keeps chaining is focused first');
+    assert.equal(await page.getAttribute('.row:nth-child(2) .pop', 'role'), 'alertdialog');
     // cancel
     await page.click('.row:nth-child(2) .px');
     assert.equal(await popVisible(), false);
     assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '9:30 AM', '10:30 AM']);
     assert.equal(await page.locator('#chain').getAttribute('aria-pressed'), 'true');
-    // confirm
-    await page.click('.row:nth-child(2) .sc');
-    await page.keyboard.type('2:00');
-    await page.keyboard.press('p');
-    await page.keyboard.press('Enter');
-    await page.click('.row:nth-child(2) .pk');
-    assert.equal(await popVisible(), false);
+  });
+});
+
+test('popup choice 1, cut and continue: the new start cuts the chain, chaining stays on, the rest follow', async () => {
+  const rows = [R('a', 'a', 30, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30), R('d', 'd', 30)];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    await editLowerStart(page, 2, '2:00', 'p');
+    await page.click('.row:nth-child(2) .pc');
+    assert.equal(await page.locator('.pop:visible').count(), 0);
+    assert.equal(await page.locator('#chain').getAttribute('aria-pressed'), 'true', 'chaining stays on');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '2:00 PM', '3:00 PM', '3:30 PM']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['9:30 AM', '3:00 PM', '3:30 PM', '4:00 PM']);
+    await settle(page);
+    const s = await saved(page);
+    assert.equal(s.chain, true);
+    assert.deepEqual(s.rows.map((r) => r.start), [H(9), H(14), null, null]);
+  });
+});
+
+test('popup choice 2, disable chaining: chaining turns off and only entered starts remain', async () => {
+  const rows = [R('a', 'a', 30, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30)];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    await editLowerStart(page, 2, '2:00', 'p');
+    await page.click('.row:nth-child(2) .pd');
+    assert.equal(await page.locator('.pop:visible').count(), 0);
     assert.equal(await page.locator('#chain').getAttribute('aria-pressed'), 'false');
     assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '2:00 PM', '']);
     assert.deepEqual(await rowsText(page, '.ev'), ['9:30 AM', '3:00 PM', '']);
@@ -324,6 +347,40 @@ test('chained: editing a lower start opens a popup; cancel changes nothing; conf
     const s = await saved(page);
     assert.equal(s.chain, false);
     assert.deepEqual(s.rows.map((r) => r.start), [H(9), H(14), null]);
+  });
+});
+
+test('popup by keyboard: Enter picks the focused choice, Tab reaches the others, Esc cancels', async () => {
+  const rows = [R('a', 'a', 30, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30)];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    await editLowerStart(page, 2, '2:00', 'p');
+    await page.waitForTimeout(30);
+    await page.keyboard.press('Enter'); // the focused choice is cut and continue
+    assert.equal(await page.locator('#chain').getAttribute('aria-pressed'), 'true');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '2:00 PM', '3:00 PM']);
+    await editLowerStart(page, 3, '5:00', 'p');
+    await page.waitForTimeout(30);
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'pd');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('#chain').getAttribute('aria-pressed'), 'false');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '2:00 PM', '5:00 PM']);
+  });
+});
+
+test('popup with an emptied start: cutting is unavailable, disabling chaining is not', async () => {
+  const rows = [R('a', 'a', 30, { start: H(9) }), R('b', 'b', 60), R('c', 'c', 30)];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    await page.click('.row:nth-child(2) .sc');
+    await page.fill('.row:nth-child(2) .sh', '');
+    await page.fill('.row:nth-child(2) .sn', '');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('.row:nth-child(2) .pop').isVisible(), true);
+    assert.equal(await page.$eval('.row:nth-child(2) .pc', (b) => b.disabled), true);
+    assert.equal(await page.$eval('.row:nth-child(2) .pd', (b) => b.disabled), false);
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'pd' );
+    await page.click('.row:nth-child(2) .px');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '9:30 AM', '10:30 AM']);
   });
 });
 

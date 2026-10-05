@@ -120,10 +120,11 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .pop::after { content: ""; position: absolute; left: 100%; top: 50%; width: 8px; height: 8px; margin-left: -5px; transform: translateY(-50%) rotate(45deg); background: var(--raised); border-top: 1px solid var(--line-2); border-right: 1px solid var(--line-2); }
 .row.pend .pop { display: flex; }
 .pop > * { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 5px; }
-.pw { color: var(--st-prog); }
-.pk { color: var(--st-done); }
+.pc { color: var(--accent); }
+.pd { color: var(--st-prog); }
 .px { color: var(--muted); }
-.pk:hover, .px:hover { background: rgba(255, 255, 255, .08); }
+.pc:hover, .pd:hover, .px:hover { background: rgba(255, 255, 255, .08); }
+.pop button:disabled { opacity: .35; cursor: default; background: none; }
 
 /* add + clear */
 .add { display: flex; align-items: center; justify-content: center; width: 100%; height: 30px; margin-top: 6px; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--muted); }
@@ -293,11 +294,11 @@ function hydrate(d) {
   const P = {
     plus: '<path d="M12 5v14M5 12h14"/>',
     x: '<path d="M6 6l12 12M18 6L6 18"/>',
-    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
     unlink: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/><path d="M4 4l16 16"/>',
+    scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/>',
     alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.4v.1"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   };
@@ -343,8 +344,8 @@ function hydrate(d) {
           <input class="sh" type="text" inputmode="numeric" maxlength="2" placeholder="--" autocomplete="off" aria-label="hr"><span class="co">:</span><input class="sn" type="text" inputmode="numeric" maxlength="2" placeholder="--" autocomplete="off" aria-label="min"><button class="sa" type="button">AM</button>
         </div>
         <div class="pop" role="alertdialog">
-          <span class="pw" data-tip="Chaining will be disabled" role="img" aria-label="Chaining will be disabled">${icon('unlink')}</span>
-          <button class="pk" type="button" data-tip="Confirm" aria-label="Confirm">${icon('check')}</button>
+          <button class="pc" type="button" data-tip="Cut and continue" aria-label="Cut and continue">${icon('scissors')}</button>
+          <button class="pd" type="button" data-tip="Disable chaining" aria-label="Disable chaining">${icon('unlink')}</button>
           <button class="px" type="button" data-tip="Cancel" aria-label="Cancel">${icon('x')}</button>
         </div>
       </div>
@@ -382,6 +383,7 @@ function hydrate(d) {
     const isPend = pending && pending.id === r.id;
     const shown = isPend ? pending.value : s.start;
     el.classList.toggle('pend', !!isPend);
+    $('.pc', el).disabled = !(isPend && pending.value != null); // an empty start cannot cut the chain
     el.classList.toggle('has-start', shown != null);
     $('.sv', el).textContent = shown == null ? '' : fmtClock(shown);
     $('.sg', el).placeholder = s.derived ? '' : '--:-- --';
@@ -518,7 +520,7 @@ function hydrate(d) {
       // a chained lower row that follows the row above has no start of its own: ask before turning chaining off
       pending = { id, value: v };
       render();
-      setTimeout(() => { const k = $('.pk', el); if (pending && pending.id === id && k) k.focus(); }, 0);
+      setTimeout(() => { const k = $(v == null ? '.pd' : '.pc', el); if (pending && pending.id === id && k) k.focus(); }, 0);
       return;
     }
     patch(id, { start: v });
@@ -547,12 +549,13 @@ function hydrate(d) {
     if (!b.disabled) b.focus();
   }
 
-  function confirmPending() {
+  // Two ways to keep an edited start on a row that followed the one above:
+  // cut here (chaining stays on; the rows after continue from the new start) or turn chaining off.
+  function resolvePending(disable) {
     if (!pending) return;
     const { id, value } = pending;
     pending = null;
-    settingsTouched = true;
-    state.chain = false;
+    if (disable) { settingsTouched = true; state.chain = false; }
     state.rows = state.rows.map((r) => (r.id === id ? { ...r, start: value } : r));
     commit();
   }
@@ -589,7 +592,8 @@ function hydrate(d) {
     const id = el.dataset.id, t = e.target;
     if (t.closest('.st')) { const r = rowOf(id); if (r) patch(id, statusPatch(r)); }
     else if (t.closest('.rm')) { state.rows = removeRow(state.rows, id, state.chain); if (pending && pending.id === id) pending = null; commit(); }
-    else if (t.closest('.pk')) confirmPending();
+    else if (t.closest('.pc')) resolvePending(false);
+    else if (t.closest('.pd')) resolvePending(true);
     else if (t.closest('.px')) cancelPending();
     else if (t.closest('.sa, .ea')) { const k = t.closest('.ea') ? 'end' : 'start'; setAp(el, k, $(TE[k].a, el).textContent === 'AM' ? 'PM' : 'AM'); }
     else if (t.closest('.ev')) { if (!el._ed) openEnd(el); }
