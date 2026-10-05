@@ -585,7 +585,7 @@ test('tooltips: nothing on a quick hover, short text after a long hover, every i
     await page.waitForTimeout(1100);
     assert.equal(await tipText(), 'Clear all');
     // every icon-only control carries a tip
-    const missing = await page.$$eval('button, [role=img]', (els) => els.filter((e) => e.offsetParent && !e.dataset.tip && !e.classList.contains('dv') && !e.classList.contains('sv') && !e.classList.contains('sa')).map((e) => e.className));
+    const missing = await page.$$eval('button, [role=img]', (els) => els.filter((e) => e.offsetParent && !e.dataset.tip && !e.classList.contains('dv') && !e.classList.contains('sv') && !e.classList.contains('sa') && !e.classList.contains('ea') && !e.classList.contains('ev')).map((e) => e.className));
     assert.deepEqual(missing, []);
     assert.equal(await page.$$eval('[title]', (e) => e.length), 0, 'no native title tooltips');
   });
@@ -661,5 +661,128 @@ test('keyboard: Tab passes an empty start without opening it; Enter opens the ed
     await page.keyboard.press('p');
     await page.keyboard.press('Enter');
     assert.deepEqual(await rowsText(page, '.sv'), ['7:45 PM']);
+  });
+});
+
+test('end time: read-only until the row is done, then editable', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 30)];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    const disabled = () => page.$$eval('.row .ev', (b) => b.map((x) => x.disabled));
+    assert.deepEqual(await disabled(), [true, true], 'not done: not editable');
+    await page.click('.row:nth-child(1) .ev', { force: true });
+    assert.equal(await page.locator('.row:nth-child(1) .eh').isVisible(), false);
+    await page.click('.row:nth-child(1) .st');
+    assert.deepEqual(await disabled(), [true, true], 'in progress: still not editable');
+    await page.click('.row:nth-child(1) .st'); // done
+    assert.deepEqual(await disabled(), [false, true]);
+    await page.click('.row:nth-child(1) .st'); // not started again
+    assert.deepEqual(await disabled(), [true, true], 'editing is only for done rows');
+  });
+});
+
+test('end time: editing a done row sets its real duration; chained rows, progress and storage follow', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9), status: 2 }), R('b', 'b', 30), R('c', 'c', 90, { status: 2 })];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM', '10:30 AM', '12:00 PM']);
+    assert.equal(await pct(page), '75%');
+    await page.click('.row:nth-child(1) .ev');
+    assert.equal(await page.inputValue('.row:nth-child(1) .eh'), '10');
+    assert.equal(await page.inputValue('.row:nth-child(1) .en'), '00');
+    assert.equal(await page.textContent('.row:nth-child(1) .ea'), 'AM');
+    assert.equal(await page.locator('.row:nth-child(1) .ev').isVisible(), false, 'editor replaces the value');
+    await page.keyboard.type('10:45');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await rowsText(page, '.dv'), ['1 hr 45 min', '30 min', '1 hr 30 min']);
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:45 AM', '11:15 AM'], 'chained starts recalculated');
+    assert.deepEqual(await rowsText(page, '.ev'), ['10:45 AM', '11:15 AM', '12:45 PM']);
+    assert.equal(await pct(page), `${Math.round(((2 / 3 + 195 / 225) / 2) * 100)}%`, 'minutes weight uses the new duration');
+    await settle(page);
+    assert.deepEqual((await saved(page)).rows.map((r) => r.mins), [105, 30, 90]);
+  });
+});
+
+test('end time: Esc cancels, unchanged or equal-to-start is ignored, PM and past-midnight work', async () => {
+  const rows = [R('a', 'a', 60, { start: H(22, 30), status: 2 }), R('b', 'b', 30)];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    const open = () => page.click('.row:nth-child(1) .ev');
+    await open();
+    await page.keyboard.type('11:45');
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await rowsText(page, '.dv'), ['1 hr', '30 min']);
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'ev', 'focus returns to the end');
+    await open();
+    await page.keyboard.press('Enter'); // unchanged
+    assert.deepEqual(await rowsText(page, '.dv'), ['1 hr', '30 min']);
+    await open();
+    await page.keyboard.type('10:30');
+    await page.keyboard.press('p'); // same as the start: zero minutes, rejected
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await rowsText(page, '.dv'), ['1 hr', '30 min']);
+    await open();
+    await page.keyboard.type('1:15'); // 1:15 AM, past midnight
+    await page.keyboard.press('a');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await rowsText(page, '.dv'), ['2 hrs 45 min', '30 min']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['1:15 AM', '1:45 AM']);
+    await open();
+    await page.fill('.row:nth-child(1) .eh', '');
+    await page.fill('.row:nth-child(1) .en', '');
+    await page.keyboard.press('Enter'); // empty: ignored
+    assert.deepEqual(await rowsText(page, '.dv'), ['2 hrs 45 min', '30 min']);
+  });
+});
+
+test('end time: commits on blur, AM/PM button toggles, works unchained, and needs a start', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9), status: 2 }), R('b', 'b', 30, { status: 2 }), R('c', 'c', 45, { start: H(14), status: 2 })];
+  await withPage({ initial: doc(rows, { times: true, chain: false }) }, async (page) => {
+    assert.deepEqual(await page.$$eval('.row .ev', (b) => b.map((x) => x.disabled)), [false, true, false], 'a row with no start has no end to edit');
+    await page.click('.row:nth-child(3) .ev');
+    await page.keyboard.type('3:00');
+    assert.equal(await page.textContent('.row:nth-child(3) .ea'), 'PM', 'opens on the current period');
+    await page.click('.row:nth-child(3) .ea');
+    assert.equal(await page.textContent('.row:nth-child(3) .ea'), 'AM');
+    await page.click('.row:nth-child(3) .ea');
+    assert.equal(await page.textContent('.row:nth-child(3) .ea'), 'PM');
+    assert.equal(await page.locator('.row:nth-child(3) .eh').isVisible(), true, 'still editing after the toggle');
+    await page.mouse.click(600, 500); // click away commits
+    assert.deepEqual(await rowsText(page, '.dv'), ['1 hr', '30 min', '1 hr']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM', '', '3:00 PM']);
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '', '2:00 PM'], 'starts are untouched');
+  });
+});
+
+test('end time: keyboard reaches a done row end; no popup, chaining stays on', async () => {
+  const rows = [R('a', 'a', 30, { start: H(9), status: 2 }), R('b', 'b', 30)];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    await page.focus('.row:nth-child(1) .sv');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'ev');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'eh');
+    await page.keyboard.type('9:50');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await rowsText(page, '.dv'), ['50 min', '30 min']);
+    assert.equal(await page.locator('.pop:visible').count(), 0);
+    assert.equal(await page.getAttribute('#chain', 'aria-pressed'), 'true');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '9:50 AM']);
+  });
+});
+
+test('end time: a done row end keeps the dimmed look and stays out of drag', async () => {
+  const rows = [R('a', 'a', 30, { start: H(9), status: 2 }), R('b', 'b', 30), R('c', 'c', 30)];
+  await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
+    const same = await page.$eval('.row:nth-child(1)', (r) => getComputedStyle(r.querySelector('.ev')).color === getComputedStyle(r.querySelector('.sv')).color);
+    assert.equal(same, true, 'end value matches the dimmed row text');
+    // a drag that starts on the end value moves the row and does not open the editor
+    const ev = await page.locator('.row:nth-child(1) .ev').boundingBox();
+    const last = await page.locator('.row:nth-child(3)').boundingBox();
+    await page.mouse.move(ev.x + 20, ev.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(ev.x + 20, ev.y + 30, { steps: 4 });
+    await page.mouse.move(ev.x + 20, last.y + 12, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    assert.deepEqual(await names(page), ['b', 'c', 'a']);
+    assert.equal(await page.locator('.row .eh:visible').count(), 0);
   });
 });

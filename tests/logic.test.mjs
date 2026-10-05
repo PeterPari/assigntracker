@@ -6,7 +6,7 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtClock, startFromParts, isComplete, schedule, progress, moveRow, removeRow, chainOn, relink, serialize, hydrate, cleanRow };`)();
+const L = new Function(`${block}; return { fmtDur, fmtClock, startFromParts, durationFromEnd, isComplete, schedule, progress, moveRow, removeRow, chainOn, relink, serialize, hydrate, cleanRow };`)();
 
 const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, ...o });
 const H = (h, m = 0) => h * 60 + m;
@@ -155,4 +155,14 @@ test('hydrate keeps one row per id and caps name length', () => {
   const h = L.hydrate({ rows: [row('x', 10), row('x', 20), { ...row('long', 5), name: 'n'.repeat(500) }] });
   assert.deepEqual(h.rows.map((r) => [r.id, r.mins]), [['x', 10], ['long', 5]]);
   assert.equal(h.rows[1].name.length, 200);
+});
+
+test('durationFromEnd: minutes forward from the start, wrapping past midnight', () => {
+  assert.equal(L.durationFromEnd(H(9), H(10, 30)), 90);
+  assert.equal(L.durationFromEnd(H(9), H(9, 5)), 5);
+  assert.equal(L.durationFromEnd(H(23, 15), H(1, 15)), 120);
+  assert.equal(L.durationFromEnd(H(9), H(8)), 23 * 60, 'earlier clock time means the next day');
+  assert.equal(L.durationFromEnd(H(9), H(9)), null, 'zero is not a duration');
+  assert.equal(L.durationFromEnd(null, H(9)), null);
+  assert.equal(L.durationFromEnd(H(9), null), null);
 });

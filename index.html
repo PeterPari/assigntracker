@@ -85,7 +85,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .row.has-dur:not(.ed-dur) .dv { display: block; }
 .de { display: none; align-items: center; gap: 3px; height: 24px; padding: 0 6px; border-radius: 5px; background: var(--raised); }
 .row.ed-dur .de, .row:not(.has-dur) .de { display: flex; }
-.de:focus-within, .se:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+.de:focus-within, .se:focus-within, .ee:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
 .de input { width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
 .u { color: var(--muted); }
 .u:nth-of-type(1) { margin-right: 5px; }
@@ -99,13 +99,17 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .row.has-start:not(.ed-start) .sv { display: block; }
 .row.derived .sv { color: var(--muted); }
 .row.pend .sv { color: var(--text); box-shadow: inset 0 0 0 1px var(--st-prog); }
-.se { display: none; align-items: center; height: 24px; padding: 0 4px 0 6px; border-radius: 5px; background: var(--raised); font-variant-numeric: tabular-nums; }
-.row.ed-start .se { display: flex; }
-.se input { width: 20px; text-align: center; }
+.se, .ee { display: none; align-items: center; height: 24px; padding: 0 4px 0 6px; border-radius: 5px; background: var(--raised); color: var(--text); font-variant-numeric: tabular-nums; }
+.row.ed-start .se, .row.ed-end .ee { display: flex; }
+.se input, .ee input { width: 20px; text-align: center; }
 .co { color: var(--muted); }
-.sa { height: 18px; margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-bg); }
-.ec { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 92px; padding: 0 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sa, .ea { height: 18px; margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-bg); }
+.ec { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 92px; padding-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ec.blank svg { visibility: hidden; }
+.ev { height: 24px; padding: 0 6px; border-radius: 5px; cursor: default; }
+.ev:not(:disabled) { cursor: text; }
+.ev:not(:disabled):hover { background: var(--raised); }
+.row.ed-end .ev { display: none; }
 
 .rm { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
 .row:hover .rm, .rm:focus-visible { opacity: 1; }
@@ -208,6 +212,13 @@ function progress(rows) {
   const nd = done.length, md = done.reduce((a, r) => a + r.mins, 0);
   if (nd === n) return 100;
   return Math.min(99, Math.round(((nd / n + md / m) / 2) * 100));
+}
+
+/** Setting a row's end to a clock time sets its duration: minutes forward from its start (1-1439, wraps past midnight). */
+function durationFromEnd(start, end) {
+  if (start == null || end == null) return null;
+  const d = mod(end - start);
+  return d === 0 ? null : d;
 }
 
 const anchorOf = (rows) => (rows.length ? rows[0].start : null);
@@ -323,7 +334,12 @@ function hydrate(d) {
           <button class="px" type="button" data-tip="Cancel" aria-label="Cancel">${icon('x')}</button>
         </div>
       </div>
-      <div class="ec" data-tip="End">${icon('arrow', 13)}<span class="ev"></span></div>
+      <div class="ec" data-tip="End">
+        ${icon('arrow', 13)}<button class="ev" type="button" disabled></button>
+        <div class="ee">
+          <input class="eh" type="text" inputmode="numeric" maxlength="2" placeholder="--" autocomplete="off" aria-label="hr"><span class="co">:</span><input class="en" type="text" inputmode="numeric" maxlength="2" placeholder="--" autocomplete="off" aria-label="min"><button class="ea" type="button">AM</button>
+        </div>
+      </div>
     </div>
     <button class="rm" type="button" data-tip="Delete" aria-label="Delete">${icon('x', 15)}</button>`;
 
@@ -332,7 +348,7 @@ function hydrate(d) {
     el.className = 'row';
     el.dataset.id = id;
     el.innerHTML = ROW_HTML;
-    el._ed = null; // which inline editor is open: 'dur' | 'start' | null
+    el._ed = null; // which inline editor is open: 'dur' | 'start' | 'end' | null
     return el;
   }
 
@@ -355,7 +371,9 @@ function hydrate(d) {
     el.classList.toggle('has-start', shown != null);
     $('.sv', el).textContent = shown == null ? '' : fmtClock(shown);
     $('.sg', el).placeholder = s.derived ? '' : '--:-- --';
-    $('.ev', el).textContent = s.end == null ? '' : fmtClock(s.end);
+    const evb = $('.ev', el);
+    evb.textContent = s.end == null ? '' : fmtClock(s.end);
+    evb.disabled = !(r.status === 2 && s.end != null); // the end can be corrected once the row is done
     $('.ec', el).classList.toggle('blank', s.end == null);
   }
 
@@ -447,29 +465,38 @@ function hydrate(d) {
     if (r && r.mins > 0) $('.dv', el).focus(); else $('.dh', el).blur();
   }
 
-  /* ---------- start time ---------- */
-  const setAp = (el, ap) => { $('.sa', el).textContent = ap; };
-  function openStart(el) {
-    const id = el.dataset.id, i = indexOf(id);
-    if (i < 0 || el._ed) return;
-    const t = schedule(state.rows, state.chain)[i].start;
-    $('.sh', el).value = t == null ? '' : String(Math.floor(t / 60) % 12 || 12);
-    $('.sn', el).value = t == null ? '' : pad2(t % 60);
-    setAp(el, t != null && t >= 720 ? 'PM' : 'AM');
-    el._ed = 'start';
-    el.classList.add('ed-start');
-    $('.sh', el).focus();
-    $('.sh', el).select();
+  /* ---------- start and end time editors (hour, minute, AM/PM) ---------- */
+  const TE = {
+    start: { h: '.sh', n: '.sn', a: '.sa' },
+    end: { h: '.eh', n: '.en', a: '.ea' },
+  };
+  const setAp = (el, kind, ap) => { $(TE[kind].a, el).textContent = ap; };
+  function openTime(el, kind, t) {
+    const c = TE[kind];
+    $(c.h, el).value = t == null ? '' : String(Math.floor(t / 60) % 12 || 12);
+    $(c.n, el).value = t == null ? '' : pad2(t % 60);
+    setAp(el, kind, t != null && t >= 720 ? 'PM' : 'AM');
+    el._ed = kind;
+    el.classList.add('ed-' + kind);
+    $(c.h, el).focus();
+    $(c.h, el).select();
   }
-  function closeStart(el) {
+  function closeTime(el, kind) {
     el._ed = null;
-    el.classList.remove('ed-start');
+    el.classList.remove('ed-' + kind);
+  }
+  const readTime = (el, kind) => startFromParts($(TE[kind].h, el).value, $(TE[kind].n, el).value, $(TE[kind].a, el).textContent);
+
+  function openStart(el) {
+    const i = indexOf(el.dataset.id);
+    if (i < 0 || el._ed) return;
+    openTime(el, 'start', schedule(state.rows, state.chain)[i].start);
   }
   function commitStart(el) {
     if (el._ed !== 'start') return;
     const id = el.dataset.id, i = indexOf(id);
-    const v = startFromParts($('.sh', el).value, $('.sn', el).value, $('.sa', el).textContent);
-    closeStart(el);
+    const v = readTime(el, 'start');
+    closeTime(el, 'start');
     if (i < 0 || v === undefined) return;
     const shown = schedule(state.rows, state.chain)[i].start;
     if (v === shown) return;
@@ -482,6 +509,30 @@ function hydrate(d) {
     }
     patch(id, { start: v });
   }
+
+  /* An end time can be corrected once the row is done. It sets the real duration (end minus start), so
+     chained rows below, progress and the saved list all follow. */
+  function openEnd(el) {
+    const i = indexOf(el.dataset.id);
+    if (i < 0 || el._ed) return;
+    const end = schedule(state.rows, state.chain)[i].end;
+    if (state.rows[i].status !== 2 || end == null) return;
+    openTime(el, 'end', end);
+  }
+  function commitEnd(el) {
+    if (el._ed !== 'end') return;
+    const id = el.dataset.id, i = indexOf(id);
+    const v = readTime(el, 'end');
+    closeTime(el, 'end');
+    if (i < 0 || typeof v !== 'number') return;
+    const d = durationFromEnd(schedule(state.rows, state.chain)[i].start, v);
+    if (d != null && d !== state.rows[i].mins) patch(id, { mins: d });
+  }
+  function focusEnd(el) {
+    const b = $('.ev', el);
+    if (!b.disabled) b.focus();
+  }
+
   function confirmPending() {
     if (!pending) return;
     const { id, value } = pending;
@@ -506,7 +557,8 @@ function hydrate(d) {
     else if (t.closest('.rm')) { state.rows = removeRow(state.rows, id, state.chain); if (pending && pending.id === id) pending = null; commit(); }
     else if (t.closest('.pk')) confirmPending();
     else if (t.closest('.px')) cancelPending();
-    else if (t.closest('.sa')) setAp(el, $('.sa', el).textContent === 'AM' ? 'PM' : 'AM');
+    else if (t.closest('.sa, .ea')) { const k = t.closest('.ea') ? 'end' : 'start'; setAp(el, k, $(TE[k].a, el).textContent === 'AM' ? 'PM' : 'AM'); }
+    else if (t.closest('.ev')) { if (!el._ed) openEnd(el); }
     else if (t.closest('.nm')) { const i = $('.nmi', el); if (document.activeElement !== i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
     else if (t.closest('.du')) { if (!el._ed && el.classList.contains('has-dur')) openDur(el); }
     else if (t.closest('.sc') && !t.closest('.pop')) { if (!el._ed && !(pending && pending.id === id)) openStart(el); }
@@ -525,6 +577,7 @@ function hydrate(d) {
     if (e.target.matches('.nmi')) commitName(el, false);
     else if (e.target.closest('.de')) { if (!(to && $('.de', el).contains(to))) commitDur(el, false); }
     else if (e.target.closest('.se')) { if (!(to && $('.se', el).contains(to))) commitStart(el); }
+    else if (e.target.closest('.ee')) { if (!(to && $('.ee', el).contains(to))) commitEnd(el); }
   });
 
   list.addEventListener('keydown', (e) => {
@@ -538,26 +591,27 @@ function hydrate(d) {
     } else if (t.closest('.de')) {
       if (e.key === 'Enter') { e.preventDefault(); commitDur(el, true); }
       else if (e.key === 'Escape') cancelDur(el);
-    } else if (t.closest('.se')) {
-      if (e.key === 'Enter') { e.preventDefault(); commitStart(el); }
-      else if (e.key === 'Escape') closeStart(el);
-      else if (/^[ap]$/i.test(e.key)) { e.preventDefault(); setAp(el, e.key.toLowerCase() === 'a' ? 'AM' : 'PM'); }
-      else if (e.key === ':' && t.matches('.sh')) { e.preventDefault(); $('.sn', el).focus(); $('.sn', el).select(); }
+    } else if (t.closest('.se, .ee')) {
+      const k = t.closest('.ee') ? 'end' : 'start', c = TE[k];
+      if (e.key === 'Enter') { e.preventDefault(); if (k === 'end') { commitEnd(el); focusEnd(el); } else commitStart(el); }
+      else if (e.key === 'Escape') { closeTime(el, k); if (k === 'end') focusEnd(el); }
+      else if (/^[ap]$/i.test(e.key)) { e.preventDefault(); setAp(el, k, e.key.toLowerCase() === 'a' ? 'AM' : 'PM'); }
+      else if (e.key === ':' && t.matches(c.h)) { e.preventDefault(); $(c.n, el).focus(); $(c.n, el).select(); }
     }
   });
 
   list.addEventListener('input', (e) => {
     const t = e.target;
-    if (!t.matches('.dh, .dm, .sh, .sn')) return;
+    if (!t.matches('.dh, .dm, .sh, .sn, .eh, .en')) return;
     const clean = t.value.replace(/\D/g, '');
     if (clean !== t.value) t.value = clean;
-    if (t.matches('.sh') && clean.length === 2) { // a full hour moves on to minutes
-      const n = $('.sn', t.closest('.row'));
+    if (t.matches('.sh, .eh') && clean.length === 2) { // a full hour moves on to minutes
+      const n = $(t.matches('.sh') ? '.sn' : '.en', t.closest('.row'));
       n.focus(); n.select();
     }
   });
 
-  list.addEventListener('focusin', (e) => { if (e.target.matches('.dh, .dm, .sh, .sn')) e.target.select(); });
+  list.addEventListener('focusin', (e) => { if (e.target.matches('.dh, .dm, .sh, .sn, .eh, .en')) e.target.select(); });
   list.addEventListener('dragstart', (e) => e.preventDefault());
 
   /* ---------- header, add, clear ---------- */
@@ -629,7 +683,7 @@ function hydrate(d) {
   list.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     const el = e.target.closest('.row');
-    if (!el || e.target.closest('input, .pop, .sa')) return;
+    if (!el || e.target.closest('input, .pop, .sa, .ea')) return;
     track = { el, id: el.dataset.id, x: e.clientX, y: e.clientY, pid: e.pointerId };
   });
 

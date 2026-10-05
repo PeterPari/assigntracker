@@ -19,6 +19,7 @@ The page shows no words. Everything is an icon except placeholders, units (`hr`,
 | Progress | Thick bar at the top with the percentage inside: `½ (done rows ÷ rows + done minutes ÷ total minutes)`. In-progress rows count as 0. |
 | Times | Clock toggle at the top, off by default. Off: no start or end time is visible anywhere. On: each row shows a 12-hour start and an end (start + duration). An end past midnight is plain clock time (`1:15 AM`). Entered starts persist through off and on. |
 | Chaining | Link toggle, on by default, shown while times are on. On: only the first row's start is entered, every lower start is the previous end, and with no first start every start and end is blank. Editing a lower start asks first (warning icon, confirm, cancel); confirm turns chaining off. Off: every row uses only its own entered start, and a row with no start has a blank end. Turning chaining on again discards every lower row's own start. |
+| End correction | Once a row is done, click its end time to correct it (hour, minute, AM/PM). The new end sets the real duration (end minus start, wrapping past midnight), so chained rows below, progress, and the saved list all follow. Not editable before the row is done, or when the row has no start. |
 | Recalculation | Reordering, deleting, or editing a duration recalculates chained times. The first start stays in the first slot. |
 
 ### Choices where the brief was silent
@@ -27,6 +28,7 @@ The page shows no words. Everything is an icon except placeholders, units (`hr`,
 - A finished row can't lose its name or duration; an empty commit restores the old value.
 - An unfinished row stays on screen so it can be completed, is never saved, and isn't counted in progress. Pressing `+` while one exists focuses it instead of adding another.
 - Start times are typed as hour, minute and an AM/PM button. `:` or two digits move to minutes; `a` and `p` set AM/PM; 13–23 read as 24-hour.
+- Editing a done row's end changes its duration, never its start. An end equal to the start, or an empty one, is ignored.
 - Turning chaining off keeps only starts that were entered. Computed starts are not copied into the rows.
 - The armed trash disarms after 4 seconds, on any other click, or on Esc.
 - The `Times` and `Chaining` toggles are saved with the list, so every viewer sees the same setup.
