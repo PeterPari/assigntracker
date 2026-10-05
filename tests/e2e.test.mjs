@@ -20,6 +20,7 @@ const rowsText = (page, sel) => page.$$eval('.row', (els, s) => els.map((e) => e
 const names = (page) => page.$$eval('.row .nmi', (els) => els.map((e) => e.value));
 const saved = (page) => page.evaluate(() => window.__db.store['tracker/list']);
 const settle = (page) => page.waitForTimeout(650); // debounce + write
+const setNow = (page, h, m) => page.evaluate(([a, b]) => window.__setNow(a, b), [h, m]);
 const pct = (page) => page.textContent('#pct');
 
 async function addRow(page, name, h, m) {
@@ -789,9 +790,10 @@ test('end time: a done row end keeps the dimmed look and stays out of drag', asy
 
 test('done: the end time fills in with the current time and stays editable', async () => {
   const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 30), R('c', 'c', 45)];
-  await withPage({ initial: doc(rows, { times: true }), now: [9, 40] }, async (page) => {
-    await page.click('.row:nth-child(1) .st'); // in progress: nothing yet
+  await withPage({ initial: doc(rows, { times: true }), now: [9, 0] }, async (page) => {
+    await page.click('.row:nth-child(1) .st'); // in progress at 9:00 AM: nothing else changes
     assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM', '10:30 AM', '11:15 AM']);
+    await setNow(page, 9, 40);
     await page.click('.row:nth-child(1) .st'); // done at 9:40 AM
     assert.deepEqual(await rowsText(page, '.ev'), ['9:40 AM', '10:10 AM', '10:55 AM']);
     assert.deepEqual(await rowsText(page, '.dv'), ['40 min', '30 min', '45 min']);
@@ -821,51 +823,140 @@ test('done: a chained lower row records its finish from its computed start', asy
 
 test('done: unchained rows use their own start; past midnight works', async () => {
   const rows = [R('a', 'a', 60, { start: H(23, 30) }), R('b', 'b', 30)];
-  await withPage({ initial: doc(rows, { times: true, chain: false }), now: [0, 10] }, async (page) => {
-    await page.click('.row:nth-child(1) .st');
-    await page.click('.row:nth-child(1) .st');
+  await withPage({ initial: doc(rows, { times: true, chain: false }), now: [23, 30] }, async (page) => {
+    await page.click('.row:nth-child(1) .st'); // in progress 11:30 PM
+    await setNow(page, 0, 10);
+    await page.click('.row:nth-child(1) .st'); // done 12:10 AM
     assert.deepEqual(await rowsText(page, '.dv'), ['40 min', '30 min']);
     assert.deepEqual(await rowsText(page, '.ev'), ['12:10 AM', '']);
-    await page.click('.row:nth-child(2) .st');
-    await page.click('.row:nth-child(2) .st'); // no start, no end: nothing to fill
-    assert.deepEqual(await rowsText(page, '.dv'), ['40 min', '30 min']);
-    assert.equal(await page.getAttribute('.row:nth-child(2) .st', 'data-tip'), 'Done');
+    // row b has no start until it is started; finishing it records from that start
+    await page.click('.row:nth-child(2) .st'); // in progress 12:10 AM
+    assert.deepEqual(await rowsText(page, '.sv'), ['11:30 PM', '12:10 AM']);
+    await setNow(page, 0, 25);
+    await page.click('.row:nth-child(2) .st'); // done 12:25 AM
+    assert.deepEqual(await rowsText(page, '.dv'), ['40 min', '15 min']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['12:10 AM', '12:25 AM']);
   });
 });
 
 test('done: times hidden, finished early, or finished in the same minute leave the duration alone', async () => {
-  const rows = [R('a', 'a', 60, { start: H(9) })];
-  await withPage({ initial: doc(rows, { times: false }), now: [9, 40] }, async (page) => {
+  await withPage({ initial: doc([R('a', 'a', 60, { start: H(9) })], { times: false }), now: [9, 40] }, async (page) => {
     await page.click('.row .st');
     await page.click('.row .st');
     assert.deepEqual(await rowsText(page, '.dv'), ['1 hr'], 'times off: nothing hidden is rewritten');
     await page.click('#times');
     assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM']);
   });
-  await withPage({ initial: doc([R('a', 'a', 60, { start: H(15) })], { times: true }), now: [13, 0] }, async (page) => {
-    await page.click('.row .st');
-    await page.click('.row .st');
+  await withPage({ initial: doc([R('a', 'a', 60)], { times: true }), now: [13, 0] }, async (page) => {
+    await page.click('.row .st'); // in progress 1:00 PM
+    await page.click('.row .sc'); // then the start is moved to later today
+    await page.keyboard.type('3:00');
+    await page.keyboard.press('p');
+    await page.keyboard.press('Enter');
+    await page.click('.row .st'); // done at 1:00 PM, before that start
     assert.deepEqual(await rowsText(page, '.dv'), ['1 hr'], 'start is later today: keep the plan');
     assert.deepEqual(await rowsText(page, '.ev'), ['4:00 PM']);
   });
   await withPage({ initial: doc([R('a', 'a', 60, { start: H(9, 40) })], { times: true }), now: [9, 40] }, async (page) => {
     await page.click('.row .st');
-    await page.click('.row .st');
+    await page.click('.row .st'); // same minute as the start
     assert.deepEqual(await rowsText(page, '.dv'), ['1 hr']);
   });
 });
 
 test('done: cycling back and finishing again records the new time', async () => {
-  const rows = [R('a', 'a', 60, { start: H(9) })];
-  await withPage({ initial: doc(rows, { times: true }), now: [9, 30] }, async (page) => {
-    for (let i = 0; i < 2; i++) await page.click('.row .st');
+  await withPage({ initial: doc([R('a', 'a', 60, { start: H(9) })], { times: true }), now: [9, 0] }, async (page) => {
+    await page.click('.row .st');
+    await setNow(page, 9, 30);
+    await page.click('.row .st');
     assert.deepEqual(await rowsText(page, '.ev'), ['9:30 AM']);
-    await page.click('.row .st'); // back to not started: the recorded duration stays
+    await page.click('.row .st'); // back to not started: the recorded times stay
     assert.deepEqual(await rowsText(page, '.dv'), ['30 min']);
     assert.equal(await page.$eval('.row .ev', (b) => b.disabled), true);
-    await page.click('.row .st');
-    await page.click('.row .st');
-    assert.deepEqual(await rowsText(page, '.dv'), ['30 min']);
+    await setNow(page, 10, 0);
+    await page.click('.row .st'); // in progress again: new start
+    assert.deepEqual(await rowsText(page, '.sv'), ['10:00 AM']);
+    await setNow(page, 10, 20);
+    await page.click('.row .st'); // done again: new end
+    assert.deepEqual(await rowsText(page, '.dv'), ['20 min']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['10:20 AM']);
     assert.equal(await page.$eval('.row .ev', (b) => b.disabled), false);
+  });
+});
+
+test('in progress: the start fills in with the current time and stays editable', async () => {
+  const rows = [R('a', 'a', 60, { start: H(8) }), R('b', 'b', 30), R('c', 'c', 45)];
+  await withPage({ initial: doc(rows, { times: true }), now: [9, 10] }, async (page) => {
+    await page.click('.row:nth-child(1) .st'); // in progress at 9:10 AM
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:10 AM', '10:10 AM', '10:40 AM'], 'chained rows follow');
+    assert.deepEqual(await rowsText(page, '.ev'), ['10:10 AM', '10:40 AM', '11:25 AM']);
+    assert.deepEqual(await rowsText(page, '.dv'), ['1 hr', '30 min', '45 min'], 'durations untouched');
+    await settle(page);
+    assert.equal((await saved(page)).rows[0].start, H(9, 10));
+    assert.equal((await saved(page)).rows[0].status, 1);
+    // still editable afterwards, with no chaining popup for the first row
+    await page.click('.row:nth-child(1) .sc');
+    await page.keyboard.type('9:00');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:00 AM', '10:30 AM']);
+    assert.equal(await page.locator('.pop:visible').count(), 0);
+  });
+});
+
+test('in progress: a blank first start gets filled and the whole chain appears', async () => {
+  await withPage({ initial: doc([R('a', 'a', 30), R('b', 'b', 30)], { times: true }), now: [14, 5] }, async (page) => {
+    assert.deepEqual(await rowsText(page, '.ev'), ['', '']);
+    await page.click('.row:nth-child(1) .st');
+    assert.deepEqual(await rowsText(page, '.sv'), ['2:05 PM', '2:35 PM']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['2:35 PM', '3:05 PM']);
+  });
+});
+
+test('in progress: a chained lower row keeps following the row above, and chaining stays on', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 30)];
+  await withPage({ initial: doc(rows, { times: true }), now: [9, 20] }, async (page) => {
+    await page.click('.row:nth-child(2) .st');
+    assert.equal(await page.getAttribute('.row:nth-child(2) .st', 'data-tip'), 'In progress');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:00 AM']);
+    assert.equal(await page.getAttribute('#chain', 'aria-pressed'), 'true');
+    assert.equal(await page.locator('.pop:visible').count(), 0);
+  });
+});
+
+test('in progress: unchained rows each get their own start', async () => {
+  const rows = [R('a', 'a', 60, { start: H(9) }), R('b', 'b', 30), R('c', 'c', 30, { start: H(15) })];
+  await withPage({ initial: doc(rows, { times: true, chain: false }), now: [11, 45] }, async (page) => {
+    await page.click('.row:nth-child(2) .st');
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '11:45 AM', '3:00 PM']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM', '12:15 PM', '3:30 PM']);
+    await settle(page);
+    assert.deepEqual((await saved(page)).rows.map((r) => r.start), [H(9), H(11, 45), H(15)]);
+    assert.equal((await saved(page)).chain, false);
+  });
+});
+
+test('in progress: nothing is recorded while times are hidden', async () => {
+  await withPage({ initial: doc([R('a', 'a', 60, { start: H(8) })], { times: false }), now: [9, 10] }, async (page) => {
+    await page.click('.row .st');
+    await page.click('#times');
+    assert.deepEqual(await rowsText(page, '.sv'), ['8:00 AM']);
+  });
+});
+
+test('start then finish: start stamps on in progress, end stamps on done, duration is the real time spent', async () => {
+  await withPage({ initial: doc([R('a', 'a', 60), R('b', 'b', 30)], { times: true }), now: [9, 10] }, async (page) => {
+    await page.click('.row:nth-child(1) .st');             // in progress, 9:10 AM
+    await setNow(page, 9, 55);
+    await page.click('.row:nth-child(1) .st');             // done, 9:55 AM
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:10 AM', '9:55 AM']);
+    assert.deepEqual(await rowsText(page, '.ev'), ['9:55 AM', '10:25 AM']);
+    assert.deepEqual(await rowsText(page, '.dv'), ['45 min', '30 min']);
+    await page.click('.row:nth-child(1) .st');             // back to not started: times stay
+    assert.deepEqual(await rowsText(page, '.sv'), ['9:10 AM', '9:55 AM']);
+    await setNow(page, 11, 0);
+    await page.click('.row:nth-child(1) .st');             // in progress again: new start
+    assert.deepEqual(await rowsText(page, '.sv'), ['11:00 AM', '11:45 AM']);
+    await settle(page);
+    assert.deepEqual((await saved(page)).rows.map((r) => [r.status, r.start, r.mins]), [[1, H(11), 45], [0, null, 30]]);
   });
 });

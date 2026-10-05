@@ -64,8 +64,9 @@ export async function openPage(browser, { initial, missing, now } = {}) {
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.addInitScript(mockDbScript(initial));
-  if (now) { // now: [hour, minute] local time, frozen
-    await page.addInitScript(`(() => { const R = Date, T = new R(2026, 9, 5, ${now[0]}, ${now[1]}, 20).getTime();
+  if (now) { // now: [hour, minute] local time, frozen; window.__setNow(h, m) moves it
+    await page.addInitScript(`(() => { const R = Date; let T = new R(2026, 9, 5, ${now[0]}, ${now[1]}, 20).getTime();
+      window.__setNow = (h, m) => { T = new R(2026, 9, 5, h, m, 20).getTime(); };
       window.Date = class extends R { constructor(...a) { if (a.length) super(...a); else super(T); } static now() { return T; } }; })();`);
   }
   if (missing) await page.addInitScript('window.__db.missing = true;');

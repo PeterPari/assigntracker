@@ -556,12 +556,19 @@ function hydrate(d) {
   }
 
   /* ---------- status ---------- */
+  const nowMins = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
   function statusPatch(r) {
     const status = (r.status + 1) % 3, p = { status };
-    if (status === 2 && state.times) { // finishing now: the visible end time becomes the current time
-      const s = schedule(state.rows, state.chain)[indexOf(r.id)];
+    if (!state.times) return p; // times hidden: nothing time-related is recorded
+    const i = indexOf(r.id);
+    if (status === 1 && (!state.chain || i === 0)) {
+      // starting now: the start becomes the current time. A chained lower row has no start of its own; it follows the row above.
+      p.start = nowMins();
+    } else if (status === 2) {
+      // finishing now: the visible end time becomes the current time
+      const s = schedule(state.rows, state.chain)[i];
       if (s.end != null) {
-        const now = new Date(), d = durationOnDone(s.start, now.getHours() * 60 + now.getMinutes());
+        const d = durationOnDone(s.start, nowMins());
         if (d != null) p.mins = d;
       }
     }
