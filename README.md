@@ -2,7 +2,7 @@
 
 A one-page assignment tracker with a shared list, a progress bar, optional start and end times, and drag to reorder. It is a single self-contained HTML file (`index.html`), published as a Claude Artifact. Dark theme, system sans-serif, desktop only.
 
-The page shows no words. Everything is an icon except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, tooltips, and the one message in the all-done popup. Tooltips appear after a long hover (800 ms).
+The page shows no words. Everything is an icon except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, tooltips, the one message in the all-done popup, and the picture that popup shares. Tooltips appear after a long hover (800 ms).
 
 ## What it does
 
@@ -23,6 +23,7 @@ The page shows no words. Everything is an icon except placeholders, units (`hr`,
 | End time on done | Marking a row done while times are shown fills its end with the current time: the duration becomes start-to-now, so chained rows below, progress and the saved list follow. |
 | End correction | Once a row is done, click its end time to correct it (hour, minute, AM/PM). The new end sets the real duration (end minus start, wrapping past midnight), so chained rows below, progress, and the saved list all follow. Not editable before the row is done, or when the row has no start. |
 | All done | Checking off the last open row pops up a centered message over the page: `You finished all of your assignments in 2 hours and 30 minutes`. The time is the total of every row's duration, worded in full (`45 minutes`, `1 hour`, `1 hour and 1 minute`). Close it with the × button, Esc, or a click outside it. |
+| Share | A small share icon in the popup, left of the ×. It draws a picture (1200 × 630, saved at 2x) in the app's own colors: the all-done sentence, the total time, how many assignments and the date, and a full progress bar. It never shows assignment names, so it is safe to post. The picture goes out the best way the page can: the system share sheet, else a copy to the clipboard (the picture, plus the sentence as text for pasting into a plain text box), else a PNG save through the `downloads` capability, which asks the viewer to confirm. The result shows as a tooltip on the button, which turns into a check for about two seconds. |
 | Recalculation | Reordering, deleting, or editing a duration recalculates chained times. The first start stays in the first slot. |
 
 ### Choices where the brief was silent
@@ -42,6 +43,10 @@ The page shows no words. Everything is an icon except placeholders, units (`hr`,
 - The all-done total is the sum of the rows' durations. With times shown, a row marked done records start-to-now, so the total is the time really spent; with times hidden it is the planned total.
 - The all-done popup opens only when a status click finishes the list. It stays quiet when a finished list loads, when deleting the last open row leaves only done rows, and when an edit changes a done row. Un-marking a row and finishing it again shows it again, with the current total. An unfinished draft row is ignored, as it is in progress.
 - While the popup is open, keyboard focus stays on its close button, and returns to the status button on close. The click that dismisses it does nothing else.
+- The picture is drawn when the popup opens, so a click can send it at once (some browsers only allow sharing straight from a click). It uses flat colors only: a gradient is dithered by the browser and made the PNG about nine times larger.
+- Inside the artifact frame the browser's share sheet is refused, so there the button copies to the clipboard first and saves as a PNG if the clipboard refuses. Where the page runs outside the frame and the share sheet is allowed, it goes there first.
+- Closing the share sheet or declining the save confirmation is not an error and shows nothing. A busy confirmation says `Try again in a moment`; a dead end says `Could not share`, and the button works again afterwards.
+- Keyboard focus starts on the × (not the share button), so the Enter that finished the last row cannot share anything. Tab cycles between the two buttons.
 - A small warning icon appears in the header only when the list could not be saved or loaded (no database, view-only access, or a failed write).
 
 ## Data
@@ -74,7 +79,7 @@ Vanilla Pointer Events, no library. The list is small and uniform, so about 60 l
 index.html            the page (artifact source: <title>, <style>, markup, <script>)
 tests/logic.test.mjs  unit tests for the pure logic block (formatting, schedule, progress, all-done, reorder, storage)
 tests/e2e.test.mjs    Chromium tests for every feature, with the database mocked
-tests/harness.mjs     wraps index.html like the publisher does and provides the mock database
+tests/harness.mjs     wraps index.html like the publisher does and provides the mock database and `downloads` capability
 ```
 
 The script keeps all pure logic between `/* <logic> */` and `/* </logic> */`, which is what the unit tests load.
@@ -90,4 +95,4 @@ Chromium is expected at the Playwright default location (`PLAYWRIGHT_BROWSERS_PA
 
 ## Publish
 
-Publish `index.html` as a Claude Artifact with the `db` capability (`capabilities: { db: {} }`). Anyone who can write shared data (Contributor and up) can edit the list; view-only viewers see the list and the warning icon if they try.
+Publish `index.html` as a Claude Artifact with the `db` and `downloads` capabilities (`capabilities: { db: {}, downloads: true }`). `downloads` is how the share button saves a picture when the clipboard refuses. Anyone who can write shared data (Contributor and up) can edit the list; view-only viewers see the list and the warning icon if they try.

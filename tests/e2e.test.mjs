@@ -1244,16 +1244,22 @@ test('all done: closes with the X, Esc, or a click outside, but not a click on t
   });
 });
 
-test('all done: keyboard focus goes to the close button, stays there on Tab, and returns to the row on close', async () => {
+test('all done: keyboard focus starts on the close button, cycles between the two buttons, and returns to the row on close', async () => {
   await withPage({ initial: doc([R('a', 'a', 30)]) }, async (page) => {
+    const active = () => page.evaluate(() => document.activeElement.id);
     await page.click('.row .st');
     await page.focus('.row .st');
     await page.keyboard.press('Enter'); // done, via the keyboard
     assert.notEqual(await popup(page), null);
-    assert.equal(await page.evaluate(() => document.activeElement.id), 'doneClose');
+    assert.equal(await active(), 'doneClose', 'the safe button first: Enter must not share anything');
     await page.keyboard.press('Tab');
+    assert.equal(await active(), 'doneShare');
+    await page.keyboard.press('Tab');
+    assert.equal(await active(), 'doneClose', 'wraps around, never leaves the popup');
     await page.keyboard.press('Shift+Tab');
-    assert.equal(await page.evaluate(() => document.activeElement.id), 'doneClose', 'focus is held inside');
+    assert.equal(await active(), 'doneShare');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await active(), 'doneClose');
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => document.activeElement.className.includes('st')), true, 'focus is back on the status button');
   });
@@ -1275,5 +1281,226 @@ test('all done: the popup sits over the page and its text is readable', async ()
     assert.equal(info.color, 'rgb(231, 233, 238)');
     await settle(page);
     assert.equal((await saved(page)).rows[0].status, 2, 'the list is still saved');
+  });
+});
+
+/* ---------- sharing the result as a picture ---------- */
+// Init scripts that stand in for the browser's share sheet and clipboard, and record what the card draws.
+const SPY = `(() => {
+  window.__s = { texts: [], shares: [], clips: [], clipFail: false, shareFail: null, shareDelay: 0 };
+  const ft = CanvasRenderingContext2D.prototype.fillText;
+  CanvasRenderingContext2D.prototype.fillText = function (t, ...a) { window.__s.texts.push(String(t)); return ft.call(this, t, ...a); };
+  for (const k of ['canShare', 'share', 'clipboard']) Object.defineProperty(navigator, k, { value: undefined, configurable: true });
+})();`;
+const WITH_SHARE = `(() => {
+  Object.defineProperty(navigator, 'canShare', { value: (d) => !!(d && d.files && d.files.length), configurable: true });
+  Object.defineProperty(navigator, 'share', { value: async (d) => {
+    await new Promise((r) => setTimeout(r, window.__s.shareDelay));
+    if (window.__s.shareFail) throw new DOMException('refused', window.__s.shareFail);
+    window.__s.shares.push({ files: d.files, text: d.text });
+  }, configurable: true });
+})();`;
+const WITH_CLIPBOARD = `(() => {
+  Object.defineProperty(navigator, 'clipboard', { value: { write: async (items) => {
+    const f = window.__s.clipFail;
+    if (f === true || (f === 'multi' && items[0].types.length > 1)) throw new DOMException('refused', 'NotAllowedError');
+    window.__s.clips.push(items);
+  } }, configurable: true });
+})();`;
+const two = [R('a', 'Chemistry lab report', 50), R('b', 'Secret essay', 40)];
+const finishTwo = async (page) => { await doneAll(page, 2); await page.waitForTimeout(150); }; // the card is drawn as the popup opens
+const clickShare = async (page) => { await page.click('#doneShare'); await page.waitForTimeout(200); };
+const shareTip = (page) => page.evaluate(() => { const t = document.querySelector('#tip'); return t.classList.contains('show') ? t.textContent : null; });
+const shareState = (page) => page.$eval('#doneShare', (b) => ({ tip: b.dataset.tip, label: b.getAttribute('aria-label'), ok: b.classList.contains('ok'), bad: b.classList.contains('bad') }));
+const counts = (page) => page.evaluate(() => ({ shares: window.__s.shares.length, clips: window.__s.clips.length, downloads: window.__db.downloads.length }));
+// Decode the picture that went out by one route, in the page, and report what it is.
+const picture = (page, via) => page.evaluate(async (v) => {
+  const s = window.__s;
+  const blob = v === 'share' ? s.shares[0].files[0] : v === 'clip' ? await s.clips[0][0].getType('image/png') : window.__db.downloads[0].data;
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement('canvas');
+  c.width = bmp.width; c.height = bmp.height;
+  const x = c.getContext('2d');
+  x.drawImage(bmp, 0, 0);
+  const d = x.getImageData(0, 0, c.width, c.height).data;
+  let green = 0;
+  for (let i = 0; i < d.length; i += 4 * 97) if (d[i + 1] > 150 && d[i] < 120 && d[i + 1] > d[i] + 50) green++;
+  return { w: bmp.width, h: bmp.height, type: blob.type, size: blob.size, corner: Array.from(x.getImageData(4, 4, 1, 1).data), green, name: blob.name };
+}, via);
+
+test('share: a small icon-only button sits beside the close button, with a tooltip', async () => {
+  await withPage({ initial: doc(two), init: SPY }, async (page) => {
+    await finishTwo(page);
+    const info = await page.evaluate(() => {
+      const s = document.querySelector('#doneShare'), c = document.querySelector('#doneClose');
+      const a = s.getBoundingClientRect(), b = c.getBoundingClientRect();
+      return { w: a.width, h: a.height, left: a.right <= b.left, sameRow: Math.abs(a.top - b.top) < 1, text: s.textContent.trim(), svg: !!s.querySelector('svg'), tip: s.dataset.tip, label: s.getAttribute('aria-label'), closeTip: c.dataset.tip };
+    });
+    assert.ok(info.w <= 28 && info.h <= 28, `small: ${info.w}x${info.h}`);
+    assert.equal(info.left, true, 'left of the close button');
+    assert.equal(info.sameRow, true);
+    assert.equal(info.text, '', 'an icon, no words');
+    assert.equal(info.svg, true);
+    assert.deepEqual([info.tip, info.label, info.closeTip], ['Share', 'Share', 'Close']);
+    await page.hover('#doneShare');
+    await page.waitForTimeout(1100);
+    assert.equal(await shareTip(page), 'Share');
+  });
+});
+
+test('share: where the page may use the share sheet, the picture goes there with the sentence', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_SHARE + WITH_CLIPBOARD }, async (page) => {
+    await finishTwo(page);
+    await clickShare(page);
+    assert.deepEqual(await counts(page), { shares: 1, clips: 0, downloads: 0 }, 'the share sheet only');
+    const sent = await page.evaluate(() => ({ text: window.__s.shares[0].text, n: window.__s.shares[0].files.length }));
+    assert.equal(sent.n, 1);
+    assert.equal(sent.text, 'You finished all of your assignments in 1 hour and 30 minutes');
+    const pic = await picture(page, 'share');
+    assert.deepEqual([pic.name, pic.type], ['assignments-done.png', 'image/png']);
+    assert.deepEqual([pic.w, pic.h], [2400, 1260]);
+    assert.equal(await shareTip(page), 'Shared', 'the result shows on the button');
+    assert.deepEqual(await shareState(page), { tip: 'Shared', label: 'Shared', ok: true, bad: false });
+    assert.equal(await page.$eval('#shareStatus', (e) => e.textContent), 'Shared', 'and is announced');
+    await page.waitForTimeout(2400);
+    assert.deepEqual(await shareState(page), { tip: 'Share', label: 'Share', ok: false, bad: false }, 'the button goes back');
+    assert.equal(await shareTip(page), null);
+  });
+});
+
+test('share: closing the share sheet changes nothing and falls back to nothing', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_SHARE + WITH_CLIPBOARD }, async (page) => {
+    await finishTwo(page);
+    await page.evaluate(() => { window.__s.shareFail = 'AbortError'; });
+    await clickShare(page);
+    assert.deepEqual(await counts(page), { shares: 0, clips: 0, downloads: 0 });
+    assert.equal(await shareTip(page), null, 'backing out is not an error');
+    assert.equal((await shareState(page)).tip, 'Share');
+  });
+});
+
+test('share: a share sheet that refuses the page falls through to the clipboard', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_SHARE + WITH_CLIPBOARD }, async (page) => {
+    await finishTwo(page);
+    await page.evaluate(() => { window.__s.shareFail = 'NotAllowedError'; });
+    await clickShare(page);
+    assert.deepEqual(await counts(page), { shares: 0, clips: 1, downloads: 0 });
+  });
+});
+
+test('share: without a share sheet the picture and the sentence are copied to the clipboard', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_CLIPBOARD, now: [14, 5] }, async (page) => {
+    await finishTwo(page);
+    await clickShare(page);
+    assert.deepEqual(await counts(page), { shares: 0, clips: 1, downloads: 0 });
+    const types = await page.evaluate(() => Array.from(window.__s.clips[0][0].types).sort());
+    assert.deepEqual(types, ['image/png', 'text/plain']);
+    const line = await page.evaluate(async () => (await (await window.__s.clips[0][0].getType('text/plain')).text()));
+    assert.equal(line, 'You finished all of your assignments in 1 hour and 30 minutes');
+    const pic = await picture(page, 'clip');
+    assert.deepEqual([pic.type, pic.w, pic.h], ['image/png', 2400, 1260]);
+    assert.deepEqual(pic.corner.slice(0, 3), [19, 21, 26], "the app's own background");
+    assert.ok(pic.green > 40, `the green badge, time and bar are drawn (${pic.green})`);
+    assert.ok(pic.size < 600 * 1024, `light enough to paste (${pic.size} bytes)`);
+    assert.equal(await shareTip(page), 'Image copied');
+    assert.equal((await shareState(page)).ok, true);
+  });
+});
+
+test('share: a clipboard that takes only the picture still gets it', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_CLIPBOARD }, async (page) => {
+    await finishTwo(page);
+    await page.evaluate(() => { window.__s.clipFail = 'multi'; });
+    await clickShare(page);
+    assert.deepEqual(await counts(page), { shares: 0, clips: 1, downloads: 0 });
+    assert.deepEqual(await page.evaluate(() => Array.from(window.__s.clips[0][0].types)), ['image/png']);
+    assert.equal(await shareTip(page), 'Image copied');
+  });
+});
+
+test('share: when the clipboard refuses, the picture is offered as a PNG download', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_CLIPBOARD }, async (page) => {
+    await finishTwo(page);
+    await page.evaluate(() => { window.__s.clipFail = true; });
+    await clickShare(page);
+    assert.deepEqual(await counts(page), { shares: 0, clips: 0, downloads: 1 });
+    assert.equal(await page.evaluate(() => window.__db.downloads[0].filename), 'assignments-done.png');
+    const pic = await picture(page, 'download');
+    assert.deepEqual([pic.w, pic.h], [2400, 1260]);
+    assert.equal(await shareTip(page), 'Image saved');
+  });
+});
+
+test('share: with no share sheet and no clipboard it saves the picture', async () => {
+  await withPage({ initial: doc(two), init: SPY }, async (page) => {
+    await finishTwo(page);
+    await clickShare(page);
+    assert.deepEqual(await counts(page), { shares: 0, clips: 0, downloads: 1 });
+  });
+});
+
+test('share: a declined save is quiet, a busy one says to retry, and a dead end says so and recovers', async () => {
+  await withPage({ initial: doc(two), init: SPY }, async (page) => {
+    await finishTwo(page);
+    await page.evaluate(() => { window.__db.downloadFail = 'declined'; });
+    await clickShare(page);
+    assert.equal(await shareTip(page), null, 'declining the confirmation is not an error');
+    assert.equal((await shareState(page)).bad, false);
+    await page.evaluate(() => { window.__db.downloadFail = 'rate_limited'; });
+    await clickShare(page);
+    assert.equal(await shareTip(page), 'Try again in a moment');
+    await page.waitForTimeout(2400);
+    await page.evaluate(() => { window.__db.downloadFail = null; window.__db.noDownloads = true; });
+    await clickShare(page);
+    assert.equal(await shareTip(page), 'Could not share');
+    assert.deepEqual(await shareState(page), { tip: 'Could not share', label: 'Could not share', ok: false, bad: true });
+    await page.evaluate(() => { window.__db.noDownloads = false; });
+    await page.waitForTimeout(2400);
+    await clickShare(page);
+    assert.equal(await shareTip(page), 'Image saved', 'the button still works afterwards');
+    assert.equal(await page.evaluate(() => window.__db.downloads.length), 1);
+  });
+});
+
+test('share: a double click sends the picture once', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_SHARE }, async (page) => {
+    await finishTwo(page);
+    await page.evaluate(() => { window.__s.shareDelay = 400; });
+    await page.dblclick('#doneShare');
+    await page.waitForTimeout(800);
+    assert.equal((await counts(page)).shares, 1);
+  });
+});
+
+test('share: the picture says how long, how many and when, and never names an assignment', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_CLIPBOARD, now: [14, 5] }, async (page) => {
+    await finishTwo(page);
+    const texts = await page.evaluate(() => window.__s.texts);
+    assert.deepEqual(texts.slice(0, 3), ['You finished all of your assignments in', '1 hour and 30 minutes', texts[2]]);
+    assert.match(texts[2], /^2 assignments · .*October.*5.*2026$/);
+    assert.equal(texts[3], '100%');
+    assert.doesNotMatch(texts.join(' | '), /Chemistry|Secret|lab report|essay/i);
+  });
+  await withPage({ initial: doc([R('a', 'Only one', 45)]), init: SPY }, async (page) => {
+    await doneAll(page, 1);
+    await page.waitForTimeout(150);
+    const texts = await page.evaluate(() => window.__s.texts);
+    assert.equal(texts[1], '45 minutes');
+    assert.match(texts[2], /^1 assignment · /, 'singular for one');
+  });
+});
+
+test('share: the button works from the keyboard', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_CLIPBOARD }, async (page) => {
+    await finishTwo(page);
+    await page.keyboard.press('Tab'); // close -> share
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'doneShare');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(200);
+    assert.equal((await counts(page)).clips, 1);
+    assert.notEqual(await popup(page), null, 'sharing leaves the popup open');
+    await page.keyboard.press('Escape');
+    assert.equal(await popup(page), null);
+    assert.deepEqual(await shareState(page), { tip: 'Share', label: 'Share', ok: false, bad: false }, 'closing resets the button');
   });
 });

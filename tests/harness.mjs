@@ -25,14 +25,24 @@ export function wrappedPage() {
 /**
  * Injected before the page script. A tiny in-memory stand-in for `claude.use('db')`.
  * Control it from tests through window.__db: { store, writes, failWith, failGet, delay }.
+ * It also stands in for the `downloads` capability: saves are recorded in window.__db.downloads as { filename, data },
+ * `noDownloads` makes use('downloads') resolve null, and `downloadFail` is an error code save() rejects with.
  */
 export function mockDbScript(initial) {
   return `(() => {
-    const __db = { store: ${JSON.stringify(initial ?? {})}, writes: [], failWith: null, failGet: null, delay: 0 };
+    const __db = { store: ${JSON.stringify(initial ?? {})}, writes: [], failWith: null, failGet: null, delay: 0, downloads: [], noDownloads: false, downloadFail: null };
     window.__db = __db;
     const wait = () => new Promise(r => setTimeout(r, __db.delay));
     window.claude = {
       use: async (name) => {
+        if (name === 'downloads') {
+          if (__db.noDownloads) return null;
+          return { save: async ({ filename, data }) => {
+            if (__db.downloadFail) throw { code: __db.downloadFail, message: 'refused' };
+            __db.downloads.push({ filename, data });
+            return { status: 'saved' };
+          } };
+        }
         if (name !== 'db') return null;
         if (__db.missing) return null;
         return {
@@ -57,7 +67,7 @@ export function mockDbScript(initial) {
   })();`;
 }
 
-export async function openPage(browser, { initial, missing, now } = {}) {
+export async function openPage(browser, { initial, missing, now, init } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1100, height: 700 } });
   const page = await ctx.newPage();
   const errors = [];
@@ -70,6 +80,7 @@ export async function openPage(browser, { initial, missing, now } = {}) {
       window.Date = class extends R { constructor(...a) { if (a.length) super(...a); else super(T); } static now() { return T; } }; })();`);
   }
   if (missing) await page.addInitScript('window.__db.missing = true;');
+  if (init) await page.addInitScript(init); // extra script run before the page, after the mocks
   // addInitScript only runs on real navigations, so serve the page from a routed URL.
   await page.route('https://tracker.test/', (route) => route.fulfill({ contentType: 'text/html', body: wrappedPage() }));
   await page.goto('https://tracker.test/');

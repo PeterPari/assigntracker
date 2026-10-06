@@ -141,6 +141,10 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .dm { margin: 0; font-size: 16px; line-height: 1.45; }
 .dm b { display: block; margin-top: 2px; font-size: 20px; font-weight: 650; color: var(--st-done); font-variant-numeric: tabular-nums; }
 .dx { position: absolute; top: 8px; right: 8px; }
+.dxs { right: 38px; }
+.ib.ok { color: var(--st-done); }
+.ib.bad { color: var(--st-prog); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @keyframes ovin { from { opacity: 0; } }
 @keyframes dlgin { from { opacity: 0; transform: translateY(6px) scale(.97); } }
 
@@ -166,7 +170,9 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
   <div class="dlg">
     <span class="dk" id="doneIcon"></span>
     <p class="dm" id="doneMsg">You finished all of your assignments in <b id="doneTime"></b></p>
-    <button class="ib dx" id="doneClose" type="button" aria-label="Close"></button>
+    <button class="ib dx dxs" id="doneShare" type="button" data-tip="Share" aria-label="Share"></button>
+    <button class="ib dx" id="doneClose" type="button" data-tip="Close" aria-label="Close"></button>
+    <span class="sr" id="shareStatus" role="status" aria-live="polite"></span>
   </div>
 </div>
 <div id="tip" role="tooltip"></div>
@@ -250,6 +256,9 @@ function allDone(rows) {
 
 /** Total minutes across the finished rows: the time reported when everything is done. */
 const totalMins = (rows) => rows.filter(isComplete).reduce((a, r) => a + r.mins, 0);
+
+/** 1 -> "1 assignment", 3 -> "3 assignments": the count line on the shared picture. */
+const countLabel = (n) => n + (n === 1 ? ' assignment' : ' assignments');
 
 /** Setting a row's end to a clock time sets its duration: minutes forward from its start (1-1439, wraps past midnight). */
 function durationFromEnd(start, end) {
@@ -336,6 +345,7 @@ function hydrate(d) {
     alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.4v.1"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
+    share: '<path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
   };
   const icon = (n, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
   const STATUS = [
@@ -361,6 +371,7 @@ function hydrate(d) {
   clr.innerHTML = icon('trash', 17);
   $('#doneIcon').innerHTML = icon('check', 28);
   $('#doneClose').innerHTML = icon('x', 16);
+  $('#doneShare').innerHTML = icon('share', 16);
 
   /* ---------- rows ---------- */
   const ROW_HTML = `
@@ -623,23 +634,165 @@ function hydrate(d) {
   }
 
   /* ---------- all-done popup ---------- */
-  const ov = $('#done'), doneTime = $('#doneTime'), doneClose = $('#doneClose');
+  const ov = $('#done'), doneTime = $('#doneTime'), doneClose = $('#doneClose'), shareBtn = $('#doneShare'), shareLive = $('#shareStatus');
+  const LEAD = $('#doneMsg').firstChild.textContent.trim(); // "You finished all of your assignments in": one wording for the popup and the picture
   let doneFrom = null; // what had focus before the popup, to give it back on close
+  let card = null;     // {blob, ready, text}: the shareable picture, drawn when the popup opens so a click can send it at once
   function showDone() {
     hideTip();
-    doneTime.textContent = fmtDurLong(totalMins(state.rows));
+    const time = fmtDurLong(totalMins(state.rows));
+    doneTime.textContent = time;
+    resetShare();
+    card = { blob: null, ready: null, text: LEAD + ' ' + time };
+    const c = card;
+    c.ready = renderCard({ time, count: countLabel(state.rows.filter(isComplete).length), date: new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) })
+      .then((b) => { c.blob = b; return b; });
     doneFrom = document.activeElement;
     ov.hidden = false;
-    doneClose.focus();
+    doneClose.focus(); // the safe button first: Enter pressed to finish the last row must not share anything
   }
   function closeDone() {
     if (ov.hidden) return;
     ov.hidden = true;
+    resetShare();
     if (doneFrom && doneFrom.isConnected && doneFrom.focus) doneFrom.focus();
     doneFrom = null;
   }
   ov.addEventListener('click', (e) => { if (e.target === ov || e.target.closest('#doneClose')) closeDone(); });
-  ov.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); doneClose.focus(); } }); // the close button is the only stop
+  ov.addEventListener('keydown', (e) => { // Tab cycles between the two buttons and never leaves the popup
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const stops = [shareBtn, doneClose], i = stops.indexOf(document.activeElement);
+    stops[(i + (e.shiftKey ? -1 : 1) + stops.length) % stops.length].focus();
+  });
+
+  /* ---------- share the result as a picture ---------- */
+  const CARD_W = 1200, CARD_H = 630, CARD_SCALE = 2; // drawn at 2x so it stays sharp when pasted
+  const CARD_FILE = 'assignments-done.png';
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  /** Centered text that shrinks until it fits maxW, so a long total never runs off the picture. */
+  function fitText(ctx, text, x, y, maxW, size, weight, min) {
+    let px = size;
+    for (;;) {
+      ctx.font = weight + ' ' + px + 'px ' + FONT;
+      if (ctx.measureText(text).width <= maxW || px <= min) break;
+      px -= 2;
+    }
+    ctx.fillText(text, x, y);
+  }
+  /** The picture: the app's own colors and progress bar, the total time, how many, when. Never the assignment names. */
+  function drawCard(ctx, d) {
+    const css = getComputedStyle(document.documentElement);
+    const tok = (n, f) => css.getPropertyValue(n).trim() || f;
+    const W = CARD_W, H = CARD_H, cx = W / 2, green = tok('--st-done', '#4cc38a');
+    ctx.fillStyle = tok('--bg', '#13151a');
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = tok('--done-bg', 'rgba(76, 195, 138, .075)'); // flat, like the popup's badge: a gradient would be dithered and make the PNG huge
+    ctx.beginPath(); ctx.arc(cx, 150, 90, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = green; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.arc(cx, 150, 62, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.moveTo(cx - 26, 152); ctx.lineTo(cx - 7, 172); ctx.lineTo(cx + 28, 130); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = tok('--text', '#e7e9ee'); fitText(ctx, LEAD, cx, 298, 1040, 46, 500, 30);
+    ctx.fillStyle = green; fitText(ctx, d.time, cx, 400, 1040, 100, 700, 36);
+    ctx.fillStyle = tok('--muted', '#98a0ad'); fitText(ctx, d.count + ' \u00b7 ' + d.date, cx, 470, 1040, 30, 500, 20);
+    roundRect(ctx, 80, 540, W - 160, 28, 9);
+    ctx.fillStyle = tok('--bar-track', '#22262e'); ctx.fill();
+    ctx.fillStyle = tok('--bar-fill', '#26774a'); ctx.fill(); // 100%: the bar is full
+    ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
+    ctx.font = '600 17px ' + FONT;
+    ctx.fillText('100%', cx, 554.5);
+  }
+  /** Draws the card and resolves to a PNG blob, or null when the browser cannot. */
+  function renderCard(d) {
+    try {
+      const c = document.createElement('canvas');
+      c.width = CARD_W * CARD_SCALE; c.height = CARD_H * CARD_SCALE;
+      const ctx = c.getContext('2d');
+      if (!ctx) return Promise.resolve(null);
+      ctx.scale(CARD_SCALE, CARD_SCALE);
+      drawCard(ctx, d);
+      return new Promise((res) => c.toBlob((b) => res(b), 'image/png'));
+    } catch (_) { return Promise.resolve(null); }
+  }
+
+  /** Sends the picture by the best way this page can, in this order: the system share sheet (where the page may use it),
+   *  a copy to the clipboard (paste it into any chat or mail), then a save through the downloads capability.
+   *  Resolves to what happened: shared | copied | saved | limited | fail, or null when the person backed out. */
+  async function shareCard() {
+    const c = card, blob = c && (c.blob || await c.ready);
+    if (!blob) return 'fail';
+    const file = new File([blob], CARD_FILE, { type: 'image/png' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text: c.text });
+        return 'shared';
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return null; // they closed the share sheet
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+        const line = new Blob([c.text], { type: 'text/plain' });
+        try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob, 'text/plain': line })]); }
+        catch (_) { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); } // some browsers take the picture only
+        return 'copied';
+      }
+    } catch (_) { /* fall through to saving */ }
+    try {
+      const dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null;
+      if (dl) { await dl.save({ filename: CARD_FILE, data: blob }); return 'saved'; }
+    } catch (err) {
+      if (err && err.code === 'declined') return null; // the confirmation was refused
+      if (err && err.code === 'rate_limited') return 'limited';
+    }
+    return 'fail';
+  }
+
+  const SHARE_MSG = { shared: 'Shared', copied: 'Image copied', saved: 'Image saved', limited: 'Try again in a moment', fail: 'Could not share' };
+  let shareBusy = false, shareTimer = 0;
+  function setShare(tip, iconName, cls) {
+    shareBtn.dataset.tip = tip;
+    shareBtn.setAttribute('aria-label', tip);
+    shareBtn.innerHTML = icon(iconName, 16);
+    shareBtn.classList.toggle('ok', cls === 'ok');
+    shareBtn.classList.toggle('bad', cls === 'bad');
+  }
+  function resetShare() {
+    clearTimeout(shareTimer);
+    shareLive.textContent = '';
+    setShare('Share', 'share', '');
+    if (tipTarget === shareBtn) hideTip();
+  }
+  /** The result shows as a tooltip right on the button, and the icon turns into a check (or a warning) for a moment. */
+  function flashShare(kind) {
+    const msg = SHARE_MSG[kind];
+    if (!msg) return;
+    const ok = kind === 'shared' || kind === 'copied' || kind === 'saved';
+    setShare(msg, ok ? 'check' : 'alert', ok ? 'ok' : 'bad');
+    shareLive.textContent = msg;
+    tipTarget = shareBtn;
+    showTip(shareBtn);
+    clearTimeout(shareTimer);
+    shareTimer = setTimeout(resetShare, 2200);
+  }
+  shareBtn.addEventListener('click', async () => {
+    if (shareBusy) return;
+    shareBusy = true;
+    try { flashShare(await shareCard()); } finally { shareBusy = false; }
+  });
 
   /** Checking a row off. The popup shows when this click is the one that finishes the whole list. */
   function cycleStatus(id) {

@@ -6,7 +6,7 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow };`)();
+const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow };`)();
 
 const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, ...o });
 const H = (h, m = 0) => h * 60 + m;
@@ -250,4 +250,10 @@ test('totalMins adds up the finished rows only', () => {
   assert.equal(L.totalMins([row('a', 30, { status: 2 }), row('b', 90, { status: 2 })]), 120);
   assert.equal(L.totalMins([row('a', 30, { status: 2 }), { id: 'x', name: '', mins: 15, status: 0, start: null }]), 30);
   assert.equal(L.progress([row('a', 30, { status: 2 }), row('b', 90, { status: 2 })]), 100, 'allDone agrees with progress');
+});
+
+test('countLabel is singular only for one', () => {
+  assert.equal(L.countLabel(1), '1 assignment');
+  assert.equal(L.countLabel(2), '2 assignments');
+  assert.equal(L.countLabel(30), '30 assignments');
 });
