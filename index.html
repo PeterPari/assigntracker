@@ -134,11 +134,21 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .clr.armed { color: #fff; background: var(--danger-bg); box-shadow: none; }
 .clr:disabled { opacity: .35; cursor: default; }
 
+/* all-done popup */
+.ov { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgba(8, 9, 12, .62); animation: ovin .16s ease; }
+.dlg { position: relative; width: min(380px, 100%); padding: 30px 28px 26px; border-radius: 12px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 14px 40px rgba(0, 0, 0, .6); text-align: center; animation: dlgin .18s ease; }
+.dk { width: 44px; height: 44px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 50%; color: var(--st-done); background: var(--done-bg); }
+.dm { margin: 0; font-size: 16px; line-height: 1.45; }
+.dm b { display: block; margin-top: 2px; font-size: 20px; font-weight: 650; color: var(--st-done); font-variant-numeric: tabular-nums; }
+.dx { position: absolute; top: 8px; right: 8px; }
+@keyframes ovin { from { opacity: 0; } }
+@keyframes dlgin { from { opacity: 0; transform: translateY(6px) scale(.97); } }
+
 /* tooltip */
 #tip { position: fixed; z-index: 50; left: 0; top: 0; padding: 4px 8px; border-radius: 5px; background: #0b0c0f; color: var(--text); border: 1px solid var(--line-2); font-size: 12px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s ease; }
 #tip.show { opacity: 1; }
 
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 
 <div id="app">
@@ -152,6 +162,13 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
   <button class="add" id="add" type="button" data-tip="Add" aria-label="Add"></button>
 </div>
 <button class="clr" id="clear" type="button" aria-label="Clear"></button>
+<div class="ov" id="done" role="dialog" aria-modal="true" aria-labelledby="doneMsg" hidden>
+  <div class="dlg">
+    <span class="dk" id="doneIcon"></span>
+    <p class="dm" id="doneMsg">You finished all of your assignments in <b id="doneTime"></b></p>
+    <button class="ib dx" id="doneClose" type="button" aria-label="Close"></button>
+  </div>
+</div>
 <div id="tip" role="tooltip"></div>
 
 <script>
@@ -166,6 +183,14 @@ function fmtDur(total) {
   if (h) out.push(h + (h === 1 ? ' hr' : ' hrs'));
   if (m) out.push(m + ' min');
   return out.join(' ');
+}
+
+/** 150 -> "2 hours and 30 minutes", 45 -> "45 minutes", 120 -> "2 hours". Whole words, for the all-done message. */
+function fmtDurLong(total) {
+  const h = Math.floor(total / 60), m = total % 60, out = [];
+  if (h) out.push(h + (h === 1 ? ' hour' : ' hours'));
+  if (m || !h) out.push(m + (m === 1 ? ' minute' : ' minutes'));
+  return out.join(' and ');
 }
 
 /** Minutes since midnight (any integer, wraps past 24h) -> "3:30 PM". */
@@ -216,6 +241,15 @@ function progress(rows) {
   if (nd === n) return 100;
   return Math.min(99, Math.round(((nd / n + md / m) / 2) * 100));
 }
+
+/** Everything is checked off: at least one finished row, and every finished row is done. Unfinished rows are not assignments yet. */
+function allDone(rows) {
+  const all = rows.filter(isComplete);
+  return all.length > 0 && all.every((r) => r.status === 2);
+}
+
+/** Total minutes across the finished rows: the time reported when everything is done. */
+const totalMins = (rows) => rows.filter(isComplete).reduce((a, r) => a + r.mins, 0);
 
 /** Setting a row's end to a clock time sets its duration: minutes forward from its start (1-1439, wraps past midnight). */
 function durationFromEnd(start, end) {
@@ -301,6 +335,7 @@ function hydrate(d) {
     scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/>',
     alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.4v.1"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
   };
   const icon = (n, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
   const STATUS = [
@@ -324,6 +359,8 @@ function hydrate(d) {
   addBtn.innerHTML = icon('plus', 18);
   tWarn.innerHTML = icon('alert', 17);
   clr.innerHTML = icon('trash', 17);
+  $('#doneIcon').innerHTML = icon('check', 28);
+  $('#doneClose').innerHTML = icon('x', 16);
 
   /* ---------- rows ---------- */
   const ROW_HTML = `
@@ -585,12 +622,40 @@ function hydrate(d) {
     return p;
   }
 
+  /* ---------- all-done popup ---------- */
+  const ov = $('#done'), doneTime = $('#doneTime'), doneClose = $('#doneClose');
+  let doneFrom = null; // what had focus before the popup, to give it back on close
+  function showDone() {
+    hideTip();
+    doneTime.textContent = fmtDurLong(totalMins(state.rows));
+    doneFrom = document.activeElement;
+    ov.hidden = false;
+    doneClose.focus();
+  }
+  function closeDone() {
+    if (ov.hidden) return;
+    ov.hidden = true;
+    if (doneFrom && doneFrom.isConnected && doneFrom.focus) doneFrom.focus();
+    doneFrom = null;
+  }
+  ov.addEventListener('click', (e) => { if (e.target === ov || e.target.closest('#doneClose')) closeDone(); });
+  ov.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); doneClose.focus(); } }); // the close button is the only stop
+
+  /** Checking a row off. The popup shows when this click is the one that finishes the whole list. */
+  function cycleStatus(id) {
+    const r = rowOf(id);
+    if (!r) return;
+    const was = allDone(state.rows);
+    patch(id, statusPatch(r));
+    if (!was && allDone(state.rows)) showDone();
+  }
+
   /* ---------- list events ---------- */
   list.addEventListener('click', (e) => {
     const el = e.target.closest('.row');
     if (!el) return;
     const id = el.dataset.id, t = e.target;
-    if (t.closest('.st')) { const r = rowOf(id); if (r) patch(id, statusPatch(r)); }
+    if (t.closest('.st')) cycleStatus(id);
     else if (t.closest('.rm')) { state.rows = removeRow(state.rows, id, state.chain); if (pending && pending.id === id) pending = null; commit(); }
     else if (t.closest('.pc')) resolvePending(false);
     else if (t.closest('.pd')) resolvePending(true);
@@ -711,6 +776,7 @@ function hydrate(d) {
   }, true);
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    closeDone();
     if (pending) cancelPending();
     if (armed) disarm();
   });

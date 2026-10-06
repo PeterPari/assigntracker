@@ -6,7 +6,7 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow };`)();
+const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow };`)();
 
 const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, ...o });
 const H = (h, m = 0) => h * 60 + m;
@@ -220,4 +220,34 @@ test('moveRow and removeRow unchained never touch starts', () => {
 test('serialize keeps cuts in a chained list', () => {
   const state = { chain: true, times: true, rows: [row('a', 30, { start: H(9) }), row('b', 30, { start: H(10, 35), status: 1 }), row('c', 30)] };
   assert.deepEqual(L.serialize(state).rows.map((r) => r.start), [H(9), H(10, 35), null]);
+});
+
+test('fmtDurLong spells out hours and minutes, joined with "and", dropping an empty unit', () => {
+  assert.equal(L.fmtDurLong(150), '2 hours and 30 minutes');
+  assert.equal(L.fmtDurLong(61), '1 hour and 1 minute');
+  assert.equal(L.fmtDurLong(60), '1 hour');
+  assert.equal(L.fmtDurLong(120), '2 hours');
+  assert.equal(L.fmtDurLong(45), '45 minutes');
+  assert.equal(L.fmtDurLong(1), '1 minute');
+  assert.equal(L.fmtDurLong(0), '0 minutes');
+  for (let m = 1; m < 1500; m++) assert.ok(!/\b0 (hours?|minutes?)\b/.test(L.fmtDurLong(m)), `${m} -> ${L.fmtDurLong(m)}`);
+});
+
+test('allDone needs a finished row and every finished row done; unfinished rows do not count', () => {
+  const draft = { id: 'x', name: '', mins: 0, status: 0, start: null };
+  assert.equal(L.allDone([]), false);
+  assert.equal(L.allDone([draft]), false, 'a draft alone is not an assignment');
+  assert.equal(L.allDone([row('a', 30)]), false);
+  assert.equal(L.allDone([row('a', 30, { status: 1 })]), false, 'in progress is not done');
+  assert.equal(L.allDone([row('a', 30, { status: 2 })]), true);
+  assert.equal(L.allDone([row('a', 30, { status: 2 }), row('b', 30, { status: 1 })]), false);
+  assert.equal(L.allDone([row('a', 30, { status: 2 }), row('b', 45, { status: 2 })]), true);
+  assert.equal(L.allDone([row('a', 30, { status: 2 }), draft]), true, 'the draft is ignored, as in progress');
+});
+
+test('totalMins adds up the finished rows only', () => {
+  assert.equal(L.totalMins([]), 0);
+  assert.equal(L.totalMins([row('a', 30, { status: 2 }), row('b', 90, { status: 2 })]), 120);
+  assert.equal(L.totalMins([row('a', 30, { status: 2 }), { id: 'x', name: '', mins: 15, status: 0, start: null }]), 30);
+  assert.equal(L.progress([row('a', 30, { status: 2 }), row('b', 90, { status: 2 })]), 100, 'allDone agrees with progress');
 });

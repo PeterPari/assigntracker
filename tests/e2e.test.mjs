@@ -166,6 +166,7 @@ test('status: click cycles not started -> in progress -> done -> not started wit
     await page.click('.row .st');
     assert.equal(await tip(), 'Done');
     assert.equal(await color(), 'rgb(76, 195, 138)');
+    await page.keyboard.press('Escape'); // the only row is done: close the all-done popup
     await page.click('.row .st');
     assert.equal(await tip(), 'Not started');
     await settle(page);
@@ -536,6 +537,7 @@ test('writes only when something changed, one document, finished rows only', asy
     assert.equal(await page.evaluate(() => window.__db.writes.length), 0, 'loading does not write');
     await page.click('.row .st');
     await page.click('.row .st');
+    await page.keyboard.press('Escape'); // all-done popup
     await page.click('.row .st'); // back to the original within the debounce window
     await settle(page);
     assert.equal(await page.evaluate(() => window.__db.writes.length), 0, 'no net change, no write');
@@ -902,6 +904,7 @@ test('done: times hidden, finished early, or finished in the same minute leave t
     await page.click('.row .st');
     await page.click('.row .st');
     assert.deepEqual(await rowsText(page, '.dv'), ['1 hr'], 'times off: nothing hidden is rewritten');
+    await page.keyboard.press('Escape'); // all-done popup
     await page.click('#times');
     assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM']);
   });
@@ -928,6 +931,7 @@ test('done: cycling back and finishing again records the new time', async () => 
     await setNow(page, 9, 30);
     await page.click('.row .st');
     assert.deepEqual(await rowsText(page, '.ev'), ['9:30 AM']);
+    await page.keyboard.press('Escape'); // all-done popup
     await page.click('.row .st'); // back to not started: the recorded times stay
     assert.deepEqual(await rowsText(page, '.dv'), ['30 min']);
     assert.equal(await page.$eval('.row .ev', (b) => b.disabled), true);
@@ -1123,5 +1127,153 @@ test('start then finish: start stamps on in progress, end stamps on done, durati
     assert.deepEqual(await rowsText(page, '.sv'), ['11:00 AM', '11:45 AM']);
     await settle(page);
     assert.deepEqual((await saved(page)).rows.map((r) => [r.status, r.start, r.mins]), [[1, H(11), 45], [0, null, 30]]);
+  });
+});
+
+/* ---------- all-done popup ---------- */
+const popup = (page) => page.evaluate(() => {
+  const o = document.querySelector('#done');
+  return o.hidden ? null : o.querySelector('#doneMsg').textContent.trim();
+});
+const doneAll = async (page, n) => { for (let i = 1; i <= n; i++) { await page.click(`.row:nth-child(${i}) .st`); await page.click(`.row:nth-child(${i}) .st`); } };
+
+test('all done: checking off the last row shows how long it all took', async () => {
+  const rows = [R('a', 'a', 90), R('b', 'b', 60)];
+  await withPage({ initial: doc(rows) }, async (page) => {
+    assert.equal(await popup(page), null, 'nothing on open');
+    await page.click('.row:nth-child(1) .st');
+    await page.click('.row:nth-child(1) .st'); // first row done, second still open
+    assert.equal(await popup(page), null, 'not while a row is left');
+    await page.click('.row:nth-child(2) .st');
+    assert.equal(await popup(page), null, 'in progress is not done');
+    await page.click('.row:nth-child(2) .st');
+    assert.equal(await popup(page), 'You finished all of your assignments in 2 hours and 30 minutes');
+    assert.equal(await pct(page), '100%');
+    assert.equal(await page.locator('#done').isVisible(), true);
+  });
+});
+
+test('all done: the time is worded as minutes only, hours only, or both, with singular units', async () => {
+  const cases = [[[45], '45 minutes'], [[1], '1 minute'], [[60], '1 hour'], [[120, 60], '3 hours'], [[60, 1], '1 hour and 1 minute'], [[30, 30, 45], '1 hour and 45 minutes']];
+  for (const [mins, want] of cases) {
+    await withPage({ initial: doc(mins.map((m, i) => R('r' + i, 'r' + i, m))) }, async (page) => {
+      await doneAll(page, mins.length);
+      assert.equal(await popup(page), `You finished all of your assignments in ${want}`, mins.join('+'));
+    });
+  }
+});
+
+test('all done: only a click that finishes the list opens it; loading, deleting and edits do not', async () => {
+  await withPage({ initial: doc([R('a', 'a', 30, { status: 2 }), R('b', 'b', 30, { status: 2 })]) }, async (page) => {
+    assert.equal(await popup(page), null, 'a finished list does not announce itself on open');
+  });
+  const rows = [R('a', 'a', 30, { status: 2 }), R('b', 'b', 30, { status: 1 })];
+  await withPage({ initial: doc(rows) }, async (page) => {
+    await page.hover('.row:nth-child(2)');
+    await page.click('.row:nth-child(2) .rm'); // the only open row goes away: everything left is done, nobody checked it off
+    assert.equal(await pct(page), '100%');
+    assert.equal(await popup(page), null, 'deleting is not checking off');
+    await page.click('.row .dv');
+    await page.fill('.row .dh', '1');
+    await page.keyboard.press('Enter');
+    assert.equal(await popup(page), null, 'editing is not checking off');
+  });
+});
+
+test('all done: it comes back each time the last row is finished again, and counts the new duration', async () => {
+  await withPage({ initial: doc([R('a', 'a', 30), R('b', 'b', 30)]) }, async (page) => {
+    await doneAll(page, 2);
+    assert.equal(await popup(page), 'You finished all of your assignments in 1 hour');
+    await page.keyboard.press('Escape');
+    await page.click('.row:nth-child(2) .st'); // back to not started
+    assert.equal(await popup(page), null);
+    await page.click('.row .dv');
+    await page.fill('.row .dm', '45'); // first row edited to 45 min
+    await page.keyboard.press('Enter');
+    await page.click('.row:nth-child(2) .st');
+    await page.click('.row:nth-child(2) .st');
+    assert.equal(await popup(page), 'You finished all of your assignments in 1 hour and 15 minutes');
+  });
+});
+
+test('all done: an unfinished draft row does not hold the popup back or add time', async () => {
+  await withPage({ initial: doc([R('a', 'a', 25)]) }, async (page) => {
+    await page.click('#add');
+    await page.keyboard.type('Draft');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Escape'); // draft stays, with no duration
+    await page.click('.row:nth-child(1) .st');
+    await page.click('.row:nth-child(1) .st');
+    assert.equal(await popup(page), 'You finished all of your assignments in 25 minutes');
+  });
+});
+
+test('all done: with times on, the total is the time really spent', async () => {
+  await withPage({ initial: doc([R('a', 'a', 60), R('b', 'b', 60)], { times: true }), now: [9, 0] }, async (page) => {
+    await page.click('.row:nth-child(1) .st');   // in progress at 9:00
+    await setNow(page, 9, 40);
+    await page.click('.row:nth-child(1) .st');   // done at 9:40: 40 min, planned 60
+    await page.click('.row:nth-child(2) .st');   // in progress at 9:40
+    await setNow(page, 10, 25);
+    await page.click('.row:nth-child(2) .st');   // done at 10:25: 45 min
+    assert.equal(await popup(page), 'You finished all of your assignments in 1 hour and 25 minutes');
+  });
+});
+
+test('all done: closes with the X, Esc, or a click outside, but not a click on the message', async () => {
+  const finish = async (page) => { await doneAll(page, 1); assert.notEqual(await popup(page), null); };
+  const one = { initial: doc([R('a', 'a', 30)]) };
+  await withPage(one, async (page) => {
+    await finish(page);
+    await page.click('#doneClose');
+    assert.equal(await popup(page), null, 'X');
+    assert.equal(await page.locator('#done').isVisible(), false);
+  });
+  await withPage(one, async (page) => {
+    await finish(page);
+    await page.keyboard.press('Escape');
+    assert.equal(await popup(page), null, 'Esc');
+  });
+  await withPage(one, async (page) => {
+    await finish(page);
+    await page.click('#doneMsg');
+    assert.notEqual(await popup(page), null, 'a click on the message keeps it open');
+    await page.mouse.click(40, 400);
+    assert.equal(await popup(page), null, 'a click outside');
+    assert.equal(await page.$eval('.row .st', (e) => e.dataset.tip), 'Done', 'the closing click did not change the row');
+  });
+});
+
+test('all done: keyboard focus goes to the close button, stays there on Tab, and returns to the row on close', async () => {
+  await withPage({ initial: doc([R('a', 'a', 30)]) }, async (page) => {
+    await page.click('.row .st');
+    await page.focus('.row .st');
+    await page.keyboard.press('Enter'); // done, via the keyboard
+    assert.notEqual(await popup(page), null);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'doneClose');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'doneClose', 'focus is held inside');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => document.activeElement.className.includes('st')), true, 'focus is back on the status button');
+  });
+});
+
+test('all done: the popup sits over the page and its text is readable', async () => {
+  await withPage({ initial: doc([R('a', 'a', 30)]) }, async (page) => {
+    await doneAll(page, 1);
+    await page.waitForTimeout(350); // let the pop-in animation finish before measuring
+    const info = await page.evaluate(() => {
+      const top = document.elementFromPoint(window.innerWidth / 2, 20);
+      const dlg = document.querySelector('.dlg').getBoundingClientRect();
+      const m = document.querySelector('#doneMsg');
+      return { overlay: top.id === 'done', centered: Math.abs(dlg.left + dlg.width / 2 - window.innerWidth / 2) < 2 && Math.abs(dlg.top + dlg.height / 2 - window.innerHeight / 2) < 2, color: getComputedStyle(m).color, role: document.querySelector('#done').getAttribute('role') };
+    });
+    assert.equal(info.overlay, true, 'covers the page, including the progress bar');
+    assert.equal(info.centered, true);
+    assert.equal(info.role, 'dialog');
+    assert.equal(info.color, 'rgb(231, 233, 238)');
+    await settle(page);
+    assert.equal((await saved(page)).rows[0].status, 2, 'the list is still saved');
   });
 });

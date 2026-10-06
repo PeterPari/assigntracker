@@ -2,7 +2,7 @@
 
 A one-page assignment tracker with a shared list, a progress bar, optional start and end times, and drag to reorder. It is a single self-contained HTML file (`index.html`), published as a Claude Artifact. Dark theme, system sans-serif, desktop only.
 
-The page shows no words. Everything is an icon except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, and tooltips. Tooltips appear after a long hover (800 ms).
+The page shows no words. Everything is an icon except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, tooltips, and the one message in the all-done popup. Tooltips appear after a long hover (800 ms).
 
 ## What it does
 
@@ -22,6 +22,7 @@ The page shows no words. Everything is an icon except placeholders, units (`hr`,
 | Start time on in progress | Marking a row in progress while times are shown fills its start with the current time, and the start stays editable. Chained, that start cuts the chain before the row (the row above keeps its own end) and the rows after it continue from its end; chaining stays on. Unchained, it is simply the row's own start. |
 | End time on done | Marking a row done while times are shown fills its end with the current time: the duration becomes start-to-now, so chained rows below, progress and the saved list follow. |
 | End correction | Once a row is done, click its end time to correct it (hour, minute, AM/PM). The new end sets the real duration (end minus start, wrapping past midnight), so chained rows below, progress, and the saved list all follow. Not editable before the row is done, or when the row has no start. |
+| All done | Checking off the last open row pops up a centered message over the page: `You finished all of your assignments in 2 hours and 30 minutes`. The time is the total of every row's duration, worded in full (`45 minutes`, `1 hour`, `1 hour and 1 minute`). Close it with the × button, Esc, or a click outside it. |
 | Recalculation | Reordering, deleting, or editing a duration recalculates chained times. The first start stays in the first slot. |
 
 ### Choices where the brief was silent
@@ -38,6 +39,9 @@ The page shows no words. Everything is an icon except placeholders, units (`hr`,
 - Turning chaining off keeps only starts that were entered. Computed starts are not copied into the rows.
 - The armed trash disarms after 4 seconds, on any other click, or on Esc.
 - The `Times` and `Chaining` toggles are saved with the list, so every viewer sees the same setup.
+- The all-done total is the sum of the rows' durations. With times shown, a row marked done records start-to-now, so the total is the time really spent; with times hidden it is the planned total.
+- The all-done popup opens only when a status click finishes the list. It stays quiet when a finished list loads, when deleting the last open row leaves only done rows, and when an edit changes a done row. Un-marking a row and finishing it again shows it again, with the current total. An unfinished draft row is ignored, as it is in progress.
+- While the popup is open, keyboard focus stays on its close button, and returns to the status button on close. The click that dismisses it does nothing else.
 - A small warning icon appears in the header only when the list could not be saved or loaded (no database, view-only access, or a failed write).
 
 ## Data
@@ -68,7 +72,7 @@ Vanilla Pointer Events, no library. The list is small and uniform, so about 60 l
 
 ```
 index.html            the page (artifact source: <title>, <style>, markup, <script>)
-tests/logic.test.mjs  unit tests for the pure logic block (formatting, schedule, progress, reorder, storage)
+tests/logic.test.mjs  unit tests for the pure logic block (formatting, schedule, progress, all-done, reorder, storage)
 tests/e2e.test.mjs    Chromium tests for every feature, with the database mocked
 tests/harness.mjs     wraps index.html like the publisher does and provides the mock database
 ```
