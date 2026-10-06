@@ -140,8 +140,6 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .dk { width: 44px; height: 44px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 50%; color: var(--st-done); background: var(--done-bg); }
 .dm { margin: 0; font-size: 16px; line-height: 1.45; }
 .dm b { display: block; margin-top: 2px; font-size: 20px; font-weight: 650; color: var(--st-done); font-variant-numeric: tabular-nums; }
-.dn { display: block; width: min(220px, 100%); height: 30px; margin: 16px auto 0; padding: 0 10px; border-radius: 7px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line-2); text-align: center; }
-.dn:focus { box-shadow: inset 0 0 0 1px var(--accent); }
 .dx { position: absolute; top: 8px; right: 8px; }
 .dxs { right: 38px; }
 .ib.ok { color: var(--st-done); }
@@ -171,8 +169,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 <div class="ov" id="done" role="dialog" aria-modal="true" aria-labelledby="doneMsg" hidden>
   <div class="dlg">
     <span class="dk" id="doneIcon"></span>
-    <p class="dm" id="doneMsg"><span id="doneLead">You finished all of your assignments in</span> <b id="doneTime"></b></p>
-    <input class="dn" id="doneName" type="text" maxlength="40" placeholder="Your name" autocomplete="off" spellcheck="false" aria-label="Your name">
+    <p class="dm" id="doneMsg">Peter finished all of his assignments in <b id="doneTime"></b></p>
     <button class="ib dx dxs" id="doneShare" type="button" data-tip="Share" aria-label="Share"></button>
     <button class="ib dx" id="doneClose" type="button" data-tip="Close" aria-label="Close"></button>
     <span class="sr" id="shareStatus" role="status" aria-live="polite"></span>
@@ -259,16 +256,6 @@ function allDone(rows) {
 
 /** Total minutes across the finished rows: the time reported when everything is done. */
 const totalMins = (rows) => rows.filter(isComplete).reduce((a, r) => a + r.mins, 0);
-
-/** What someone typed as their name: whitespace tidied, at most 40 characters. */
-const cleanName = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, 40).trim();
-
-/** The all-done sentence up to the time. With no name it speaks to the viewer; with one it names them, and "their" keeps it
- *  free of any guess about who they are. */
-const doneLead = (name) => {
-  const n = cleanName(name);
-  return n ? n + ' finished all of their assignments in' : 'You finished all of your assignments in';
-};
 
 /** 1 -> "1 assignment", 3 -> "3 assignments": the count line on the shared picture. */
 const countLabel = (n) => n + (n === 1 ? ' assignment' : ' assignments');
@@ -648,66 +635,36 @@ function hydrate(d) {
 
   /* ---------- all-done popup ---------- */
   const ov = $('#done'), doneTime = $('#doneTime'), doneClose = $('#doneClose'), shareBtn = $('#doneShare'), shareLive = $('#shareStatus');
-  const leadEl = $('#doneLead'), nameInput = $('#doneName');
+  const LEAD = $('#doneMsg').firstChild.textContent.trim(); // "Peter finished all of his assignments in": one wording for the popup and the picture
   let doneFrom = null; // what had focus before the popup, to give it back on close
   let card = null;     // {blob, ready, text}: the shareable picture, drawn when the popup opens so a click can send it at once
-  let cardTimer = 0;   // a name was just typed: the picture is redrawn shortly
-
-  /* The viewer's name for the sentence. It is a per-person convenience, so it lives in this browser only and never in the shared list. */
-  const NAME_KEY = 'assigntracker.name';
-  let who = '';
-  try { who = cleanName(localStorage.getItem(NAME_KEY)); } catch (_) { /* storage can be blocked: the name then lasts until the page closes */ }
-  function saveWho() {
-    try { if (who) localStorage.setItem(NAME_KEY, who); else localStorage.removeItem(NAME_KEY); } catch (_) { /* optional */ }
-  }
-
-  /** Draws the picture for the current total and name. Replaces any earlier one. */
-  function buildCard() {
-    clearTimeout(cardTimer);
-    cardTimer = 0;
-    const time = fmtDurLong(totalMins(state.rows)), lead = doneLead(who);
-    const c = { blob: null, ready: null, text: lead + ' ' + time };
-    c.ready = renderCard({ lead, time, count: countLabel(state.rows.filter(isComplete).length), date: new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) })
-      .then((b) => { c.blob = b; return b; });
-    card = c;
-  }
   function showDone() {
     hideTip();
-    doneTime.textContent = fmtDurLong(totalMins(state.rows));
-    leadEl.textContent = doneLead(who);
-    nameInput.value = who;
+    const time = fmtDurLong(totalMins(state.rows));
+    doneTime.textContent = time;
     resetShare();
-    buildCard();
+    card = { blob: null, ready: null, text: LEAD + ' ' + time };
+    const c = card;
+    c.ready = renderCard({ time, count: countLabel(state.rows.filter(isComplete).length), date: new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) })
+      .then((b) => { c.blob = b; return b; });
     doneFrom = document.activeElement;
     ov.hidden = false;
-    // First time: ask for the name. After that the safe button, so the Enter that finished the last row cannot share anything.
-    (who ? doneClose : nameInput).focus();
+    doneClose.focus(); // the safe button first: Enter pressed to finish the last row must not share anything
   }
   function closeDone() {
     if (ov.hidden) return;
     ov.hidden = true;
-    clearTimeout(cardTimer);
-    cardTimer = 0;
     resetShare();
     if (doneFrom && doneFrom.isConnected && doneFrom.focus) doneFrom.focus();
     doneFrom = null;
   }
   ov.addEventListener('click', (e) => { if (e.target === ov || e.target.closest('#doneClose')) closeDone(); });
-  ov.addEventListener('keydown', (e) => { // Tab cycles name, share, close and never leaves the popup
+  ov.addEventListener('keydown', (e) => { // Tab cycles between the two buttons and never leaves the popup
     if (e.key !== 'Tab') return;
     e.preventDefault();
-    const stops = [nameInput, shareBtn, doneClose], i = stops.indexOf(document.activeElement);
+    const stops = [shareBtn, doneClose], i = stops.indexOf(document.activeElement);
     stops[(i + (e.shiftKey ? -1 : 1) + stops.length) % stops.length].focus();
   });
-  nameInput.addEventListener('input', () => {
-    who = cleanName(nameInput.value);
-    saveWho();
-    leadEl.textContent = doneLead(who); // the sentence follows every keystroke
-    clearTimeout(cardTimer);
-    cardTimer = setTimeout(buildCard, 250); // the picture catches up once typing pauses
-  });
-  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); shareBtn.focus(); } }); // name done: on to sharing
-  nameInput.addEventListener('blur', () => { nameInput.value = who; }); // show the tidied name
 
   /* ---------- share the result as a picture ---------- */
   const CARD_W = 1200, CARD_H = 630, CARD_SCALE = 2; // drawn at 2x so it stays sharp when pasted
@@ -748,7 +705,7 @@ function hydrate(d) {
     ctx.lineWidth = 10;
     ctx.beginPath(); ctx.moveTo(cx - 26, 152); ctx.lineTo(cx - 7, 172); ctx.lineTo(cx + 28, 130); ctx.stroke();
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = tok('--text', '#e7e9ee'); fitText(ctx, d.lead, cx, 298, 1040, 46, 500, 30);
+    ctx.fillStyle = tok('--text', '#e7e9ee'); fitText(ctx, LEAD, cx, 298, 1040, 46, 500, 30);
     ctx.fillStyle = green; fitText(ctx, d.time, cx, 400, 1040, 100, 700, 36);
     ctx.fillStyle = tok('--muted', '#98a0ad'); fitText(ctx, d.count + ' \u00b7 ' + d.date, cx, 470, 1040, 30, 500, 20);
     roundRect(ctx, 80, 540, W - 160, 28, 9);
@@ -775,7 +732,6 @@ function hydrate(d) {
    *  a copy to the clipboard (paste it into any chat or mail), then a save through the downloads capability.
    *  Resolves to what happened: shared | copied | saved | limited | fail, or null when the person backed out. */
   async function shareCard() {
-    if (cardTimer) buildCard(); // the name changed a moment ago: draw the current picture now
     const c = card, blob = c && (c.blob || await c.ready);
     if (!blob) return 'fail';
     const file = new File([blob], CARD_FILE, { type: 'image/png' });

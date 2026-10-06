@@ -6,7 +6,7 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, cleanName, doneLead, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow };`)();
+const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow };`)();
 
 const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, ...o });
 const H = (h, m = 0) => h * 60 + m;
@@ -256,23 +256,4 @@ test('countLabel is singular only for one', () => {
   assert.equal(L.countLabel(1), '1 assignment');
   assert.equal(L.countLabel(2), '2 assignments');
   assert.equal(L.countLabel(30), '30 assignments');
-});
-
-test('cleanName tidies whitespace and stops at 40 characters', () => {
-  assert.equal(L.cleanName('  Mary   Ann '), 'Mary Ann');
-  assert.equal(L.cleanName('\n\tSam\t'), 'Sam');
-  assert.equal(L.cleanName(''), '');
-  assert.equal(L.cleanName('   '), '');
-  assert.equal(L.cleanName(null), '');
-  assert.equal(L.cleanName(undefined), '');
-  assert.equal(L.cleanName('x'.repeat(60)), 'x'.repeat(40));
-  assert.equal(L.cleanName('a'.repeat(39) + ' b'), 'a'.repeat(39), 'no dangling space when the cut lands on one');
-});
-
-test('doneLead speaks to you without a name and names them with one', () => {
-  assert.equal(L.doneLead(''), 'You finished all of your assignments in');
-  assert.equal(L.doneLead('   '), 'You finished all of your assignments in');
-  assert.equal(L.doneLead(null), 'You finished all of your assignments in');
-  assert.equal(L.doneLead('Sam'), 'Sam finished all of their assignments in');
-  assert.equal(L.doneLead('  Mary   Ann '), 'Mary Ann finished all of their assignments in');
 });
