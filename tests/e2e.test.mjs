@@ -1244,22 +1244,24 @@ test('all done: closes with the X, Esc, or a click outside, but not a click on t
   });
 });
 
-test('all done: keyboard focus starts on the close button, cycles between the two buttons, and returns to the row on close', async () => {
+test('all done: focus starts on the name field, cycles name, share and close, and returns to the row on close', async () => {
   await withPage({ initial: doc([R('a', 'a', 30)]) }, async (page) => {
     const active = () => page.evaluate(() => document.activeElement.id);
     await page.click('.row .st');
     await page.focus('.row .st');
     await page.keyboard.press('Enter'); // done, via the keyboard
     assert.notEqual(await popup(page), null);
-    assert.equal(await active(), 'doneClose', 'the safe button first: Enter must not share anything');
+    assert.equal(await active(), 'doneName', 'no name yet: the popup asks for it');
     await page.keyboard.press('Tab');
     assert.equal(await active(), 'doneShare');
     await page.keyboard.press('Tab');
-    assert.equal(await active(), 'doneClose', 'wraps around, never leaves the popup');
-    await page.keyboard.press('Shift+Tab');
-    assert.equal(await active(), 'doneShare');
+    assert.equal(await active(), 'doneClose');
+    await page.keyboard.press('Tab');
+    assert.equal(await active(), 'doneName', 'wraps around, never leaves the popup');
     await page.keyboard.press('Shift+Tab');
     assert.equal(await active(), 'doneClose');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await active(), 'doneShare');
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => document.activeElement.className.includes('st')), true, 'focus is back on the status button');
   });
@@ -1502,5 +1504,129 @@ test('share: the button works from the keyboard', async () => {
     await page.keyboard.press('Escape');
     assert.equal(await popup(page), null);
     assert.deepEqual(await shareState(page), { tip: 'Share', label: 'Share', ok: false, bad: false }, 'closing resets the button');
+  });
+});
+
+/* ---------- the viewer's name in the sentence ---------- */
+const lead = (page) => page.textContent('#doneLead');
+const YOU = 'You finished all of your assignments in 1 hour and 30 minutes';
+
+test('name: the popup asks for a name, and the sentence names them as they type', async () => {
+  await withPage({ initial: doc(two) }, async (page) => {
+    await doneAll(page, 2);
+    assert.equal(await page.locator('#doneName').isVisible(), true);
+    assert.equal(await page.getAttribute('#doneName', 'placeholder'), 'Your name');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'doneName', 'ready to type');
+    assert.equal(await popup(page), YOU, 'no name yet: it speaks to you');
+    await page.keyboard.type('Sam');
+    assert.equal(await popup(page), 'Sam finished all of their assignments in 1 hour and 30 minutes', 'live, on every keystroke');
+    await page.fill('#doneName', '');
+    assert.equal(await popup(page), YOU, 'blank goes back to "You"');
+    assert.equal(await lead(page), 'You finished all of your assignments in');
+  });
+});
+
+test('name: it is remembered, shown in the field next time, and focus then starts on the close button', async () => {
+  await withPage({ initial: doc(two) }, async (page) => {
+    await doneAll(page, 2);
+    await page.keyboard.type('Sam');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'doneShare', 'Enter moves on to sharing without sharing');
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await page.waitForTimeout(150);
+    await doneAll(page, 2);
+    assert.equal(await page.inputValue('#doneName'), 'Sam');
+    assert.equal(await popup(page), 'Sam finished all of their assignments in 1 hour and 30 minutes');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'doneClose', 'known name: the safe button first');
+    await page.fill('#doneName', 'Alex');
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await page.waitForTimeout(150);
+    await doneAll(page, 2);
+    assert.equal(await page.inputValue('#doneName'), 'Alex', 'a changed name is remembered too');
+    await page.fill('#doneName', '');
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await page.waitForTimeout(150);
+    await doneAll(page, 2);
+    assert.equal(await popup(page), YOU, 'a cleared name is forgotten');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'doneName');
+  });
+});
+
+test('name: whitespace is tidied, long names are cut at 40, and a blank one means "You"', async () => {
+  await withPage({ initial: doc(two) }, async (page) => {
+    await doneAll(page, 2);
+    await page.fill('#doneName', '   Mary    Ann  ');
+    assert.equal(await lead(page), 'Mary Ann finished all of their assignments in');
+    await page.fill('#doneName', 'x'.repeat(60));
+    assert.equal(await page.inputValue('#doneName'), 'x'.repeat(40), 'the field stops at 40');
+    await page.fill('#doneName', '     ');
+    assert.equal(await lead(page), 'You finished all of your assignments in');
+    await page.fill('#doneName', ' Jo ');
+    await page.click('#doneMsg'); // click away: the field shows the tidied name
+    await page.focus('#doneClose');
+    assert.equal(await page.inputValue('#doneName'), 'Jo');
+  });
+});
+
+test('name: the shared picture and the shared sentence use it, even right after typing', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_CLIPBOARD }, async (page) => {
+    await doneAll(page, 2);
+    await page.waitForTimeout(150);
+    await page.fill('#doneName', 'Rae');
+    await page.click('#doneShare'); // well inside the 250 ms the picture takes to catch up
+    await page.waitForTimeout(300);
+    const line = await page.evaluate(async () => (await (await window.__s.clips[0][0].getType('text/plain')).text()));
+    assert.equal(line, 'Rae finished all of their assignments in 1 hour and 30 minutes');
+    const texts = await page.evaluate(() => window.__s.texts);
+    assert.ok(texts.includes('Rae finished all of their assignments in'), 'the picture was redrawn with the name');
+    const last = texts.lastIndexOf('Rae finished all of their assignments in');
+    assert.ok(!texts.slice(last).includes('You finished all of your assignments in'), 'and the newest picture is the one sent');
+    assert.doesNotMatch(texts.join('|'), /Chemistry|Secret/i);
+  });
+});
+
+test('name: a long name still fits on the picture', async () => {
+  await withPage({ initial: doc(two), init: SPY + WITH_CLIPBOARD }, async (page) => {
+    await doneAll(page, 2);
+    await page.fill('#doneName', 'Wolfeschlegelsteinhausenbergerdorff Jr');
+    await page.waitForTimeout(500);
+    const fit = await page.evaluate(() => {
+      const c = document.createElement('canvas').getContext('2d');
+      return window.__s.texts.filter((t) => t.includes('Wolfeschlegel')).length;
+    });
+    assert.ok(fit >= 1);
+    await page.click('#doneShare');
+    await page.waitForTimeout(250);
+    const pic = await picture(page, 'clip');
+    assert.deepEqual([pic.w, pic.h], [2400, 1260]);
+  });
+});
+
+test('name: it stays in this browser: the shared list never holds it', async () => {
+  await withPage({ initial: doc(two) }, async (page) => {
+    await doneAll(page, 2);
+    await page.fill('#doneName', 'Sam');
+    await settle(page);
+    const list = await saved(page);
+    assert.deepEqual(Object.keys(list).sort(), ['chain', 'rows', 'times', 'v'], 'the document has only its usual fields');
+    assert.doesNotMatch(JSON.stringify(list), /Sam/);
+  });
+});
+
+test('name: with browser storage blocked it still works for the session', async () => {
+  const blocked = `Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('blocked', 'SecurityError'); } });`;
+  await withPage({ initial: doc(two), init: blocked }, async (page) => {
+    await doneAll(page, 2);
+    assert.equal(await popup(page), YOU);
+    await page.fill('#doneName', 'Sam');
+    assert.equal(await lead(page), 'Sam finished all of their assignments in');
+    await page.keyboard.press('Escape');
+    await page.click('.row:nth-child(2) .st'); // not started
+    await page.click('.row:nth-child(2) .st');
+    await page.click('.row:nth-child(2) .st'); // done again
+    assert.equal(await page.inputValue('#doneName'), 'Sam', 'kept in memory while the page stays open');
   });
 });
