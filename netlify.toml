@@ -2,6 +2,7 @@
 # Only dist/ is published, so tests/, README and the rest of the repo are not served.
 # /api/db/* is the Netlify Function in netlify/functions/db.mjs, which stores the list in Netlify Database.
 # Migrations in netlify/database/migrations run automatically on every deploy.
+# Every request goes through netlify/edge-functions/auth.mjs first (Basic Auth; the password is the SITE_PASSWORD environment variable).
 
 [build]
   command = "node scripts/build.mjs"

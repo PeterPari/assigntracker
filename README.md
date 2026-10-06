@@ -83,6 +83,8 @@ scripts/build.mjs           makes dist/index.html: index.html as a full page plu
 scripts/netlify-db-shim.js  gives the page `claude.use('db')` and `claude.use('downloads')` on a normal website
 netlify/functions/db.mjs    Netlify Function for /api/db/*
 netlify/lib/docs-api.mjs    the handler behind it (GET/PUT one JSON document), shared with the tests
+netlify/edge-functions/auth.mjs  Netlify Edge Function in front of every path: the site password
+netlify/lib/auth.mjs        the Basic Auth check behind it, shared with the tests
 netlify/database/migrations/  SQL migrations for Netlify Database
 tests/logic.test.mjs        unit tests for the pure logic block (formatting, schedule, progress, all-done, reorder, storage)
 tests/e2e.test.mjs          Chromium tests for every feature, with the database mocked
@@ -90,6 +92,7 @@ tests/harness.mjs           wraps index.html like the publisher does and provide
 tests/api.test.mjs          the /api/db handler against a real embedded Postgres, with the real migrations
 tests/netlify.test.mjs      Chromium tests of the built page + handler + Postgres, under the CSP from netlify.toml
 tests/netlify-harness.mjs   embedded Postgres and a small server for the two files above
+tests/auth.test.mjs         the site password: the Basic Auth check and the edge function that applies it
 ```
 
 The script keeps all pure logic between `/* <logic> */` and `/* </logic> */`, which is what the unit tests load.
@@ -110,14 +113,17 @@ Chromium is expected at the Playwright default location (`PLAYWRIGHT_BROWSERS_PA
 1. `npm run build` (`scripts/build.mjs`) writes `dist/index.html`: a full HTML page with the title and styles in `<head>`, plus `scripts/netlify-db-shim.js`, which provides the same `claude.use('db')` and `claude.use('downloads')` the page already calls. The shim stores the list through `GET`/`PUT /api/db/tracker/list`; "download" is an ordinary browser download.
 2. `netlify/functions/db.mjs` answers `/api/db/*` and keeps the document in the `docs` table of [Netlify Database](https://docs.netlify.com/build/data-and-storage/netlify-database/) (managed Postgres). Only the `tracker/list` document is accepted, up to 256 KB.
 3. `netlify/database/migrations/` creates the table. Netlify applies migrations automatically before every production deploy and deploy preview. Each deploy preview gets its own database branch seeded from production, so previews never touch the live list.
+4. `netlify/edge-functions/auth.mjs` puts the site behind one shared password, so Netlify's own site password (a Pro plan feature) is not needed. It runs before everything else, so it guards the page and `/api/db/*` alike. The browser asks for the password once with its own login box (HTTP Basic Auth); the username is ignored, so anything works. The password is the `SITE_PASSWORD` environment variable, never part of the repository.
 
 To deploy: import the repository in Netlify (build command, publish directory and Node version come from `netlify.toml`). The `@netlify/database` dependency is what makes Netlify provision the database on the first deploy. Netlify Database is available on credit-based plans only.
 
-Run it locally with `npm run dev` (builds, then `netlify dev`, which serves the page and function and starts a local Postgres). Locally the migrations are not applied for you: with `npm run dev` running, run `npm run db:migrate` in a second terminal, once and again whenever a migration is added. Edit `index.html`, then restart `npm run dev` to rebuild.
+Then set the password: in Netlify, Site configuration, Environment variables, add `SITE_PASSWORD` (leave all deploy contexts ticked so deploy previews are protected too) and redeploy. Until it is set, the whole site answers `503` ("The site password is not set") instead of being served open. Pick a long passphrase: the edge function does not limit guesses, and the browser's login box has no log out.
+
+Run it locally with `npm run dev` (builds, then `netlify dev`, which serves the page, the function and the edge function, and starts a local Postgres). Locally the migrations are not applied for you: with `npm run dev` running, run `npm run db:migrate` in a second terminal, once and again whenever a migration is added. Edit `index.html`, then restart `npm run dev` to rebuild. Give it a password with `SITE_PASSWORD=something npm run dev`, or a `.env` file containing `SITE_PASSWORD=something` (`.env` is git-ignored).
 
 Things to know:
 
-- There is no sign-in. Anyone with the site URL can read, edit and clear the list, just as a shared Artifact lets everyone write. Put the site behind Netlify's password protection or another gate if that is not what you want.
+- There are no accounts, only the one shared password. Anyone who has it can read, edit and clear the list, just as a shared Artifact lets everyone write. The Claude Artifact copy is not on Netlify, so the password does not apply to it.
 - Sync works as before: the list is read once when the page opens and the latest write wins. A save that fails shows the warning icon, and a list that could not be read is never overwritten.
 - On Netlify the share button tries the share sheet, then the clipboard, then saves a PNG; the save is a plain download with no confirmation step.
 
