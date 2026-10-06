@@ -2,14 +2,26 @@
   "name": "assigntracker",
   "version": "1.0.0",
   "private": true,
-  "description": "Single-page assignment tracker, published as a Claude Artifact.",
+  "description": "Single-page assignment tracker: a Claude Artifact, also deployable on Netlify with Netlify Database.",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
-    "test": "node --test tests/logic.test.mjs tests/e2e.test.mjs",
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && npx netlify-cli dev",
+    "db:migrate": "npx netlify-cli database migrations apply",
+    "test": "node --test tests/logic.test.mjs tests/e2e.test.mjs tests/api.test.mjs tests/netlify.test.mjs",
     "test:logic": "node --test tests/logic.test.mjs",
-    "test:e2e": "node --test tests/e2e.test.mjs"
+    "test:e2e": "node --test tests/e2e.test.mjs",
+    "test:api": "node --test tests/api.test.mjs",
+    "test:netlify": "node --test tests/netlify.test.mjs"
+  },
+  "dependencies": {
+    "@netlify/database": "^2.0.1"
   },
   "devDependencies": {
+    "@netlify/database-dev": "^1.0.1",
     "playwright": "^1.56.1"
   }
 }

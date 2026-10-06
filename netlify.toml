@@ -1,0 +1,23 @@
+# Build: scripts/build.mjs turns index.html (a Claude Artifact fragment) into dist/index.html.
+# Only dist/ is published, so tests/, README and the rest of the repo are not served.
+# /api/db/* is the Netlify Function in netlify/functions/db.mjs, which stores the list in Netlify Database.
+# Migrations in netlify/database/migrations run automatically on every deploy.
+
+[build]
+  command = "node scripts/build.mjs"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+
+[dev]
+  framework = "#static"
+  publish = "dist"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "same-origin"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
