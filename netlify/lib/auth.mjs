@@ -3,6 +3,22 @@
 
 const REALM = 'Assignment tracker';
 
+/**
+ * The only paths that are served without the password: the web app manifest and the app icons. Browsers fetch these
+ * on their own, without the page's credentials, when they install the site as an app (Safari's "Add to Dock" takes
+ * its icon from /apple-touch-icon.png). Behind the password they get a 401 and the Dock shows a generic icon instead.
+ * They hold nothing but the app's name and picture. Exact paths only, never a prefix.
+ */
+export const PUBLIC_PATHS = new Set([
+  '/manifest.webmanifest',
+  '/apple-touch-icon.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-maskable-512.png',
+]);
+
+export const isPublicPath = (pathname) => PUBLIC_PATHS.has(pathname);
+
 const reply = (status, text, headers) => new Response(text, {
   status,
   headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', ...headers },

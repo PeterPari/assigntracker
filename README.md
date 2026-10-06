@@ -81,6 +81,8 @@ index.html                  the page (artifact source: <title>, <style>, markup,
 netlify.toml                Netlify build, publish directory, security headers
 scripts/build.mjs           makes dist/index.html: index.html as a full page plus the shim below
 scripts/netlify-db-shim.js  gives the page `claude.use('db')` and `claude.use('downloads')` on a normal website
+scripts/make-icons.mjs      draws the app icons into public/ (`npm run icons`)
+public/                     copied into dist/ as is: manifest.webmanifest, apple-touch-icon.png, icons/*.png
 netlify/functions/db.mjs    Netlify Function for /api/db/*
 netlify/lib/docs-api.mjs    the handler behind it (GET/PUT one JSON document), shared with the tests
 netlify/edge-functions/auth.mjs  Netlify Edge Function in front of every path: the site password
@@ -93,6 +95,7 @@ tests/api.test.mjs          the /api/db handler against a real embedded Postgres
 tests/netlify.test.mjs      Chromium tests of the built page + handler + Postgres, under the CSP from netlify.toml
 tests/netlify-harness.mjs   embedded Postgres and a small server for the two files above
 tests/auth.test.mjs         the site password: the Basic Auth check and the edge function that applies it
+tests/pwa.test.mjs          the manifest and icons, and that the files a browser fetches to install the app are served without the password
 ```
 
 The script keeps all pure logic between `/* <logic> */` and `/* </logic> */`, which is what the unit tests load.
@@ -106,6 +109,20 @@ npm test
 
 Chromium is expected at the Playwright default location (`PLAYWRIGHT_BROWSERS_PATH`). Set `PLAYWRIGHT_PATH` if Playwright is installed somewhere unusual. `api.test.mjs` and `netlify.test.mjs` start their own in-memory Postgres (PGlite), so they need no Netlify account or network.
 
+## Install as an app (Mac)
+
+The Netlify site can be installed, so it gets its own icon (the green check in a circle) and its own window, without browser tabs or an address bar.
+
+- **Safari** (macOS Sonoma or later): open the site, then File, Add to Dock. Safari takes the icon from `/apple-touch-icon.png`.
+- **Chrome or Edge**: open the site, then use the install button at the right of the address bar, or the browser menu's install entry. The icon comes from the manifest.
+
+Things to know:
+
+- If you added the site to the Dock before the icons existed, the browser kept the icon it found then (a generic one, or Netlify's). Remove that Dock app (right-click, Options, Remove from Dock, and delete the app from your Applications folder), deploy this change, then add it again. The icon is fixed at install time and does not update by itself.
+- `public/manifest.webmanifest` and the PNGs in `public/` are copied to `dist/` by the build. They are the only files served without the password (`PUBLIC_PATHS` in `netlify/lib/auth.mjs`; `tests/pwa.test.mjs` fails if `public/` and that list drift apart). Browsers fetch them on their own, without the page's login, so behind the password they got a 401 and the install fell back to a generic icon. They hold only the app's name and picture. The page and `/api/db/*` still need the password.
+- Installing does not remove the password: the installed app asks for it like the browser did, and it needs a connection, since the list lives on the server. There is no service worker, because Chrome and Edge do not need one to install and a cached copy of the page would only go stale after a deploy. A Safari Dock app does not share its login with Safari, so expect to be asked for the password when you first open it.
+- To change the picture, edit `scripts/make-icons.mjs`, run `npm run icons` (it needs Playwright's Chromium, like the tests) and commit the PNGs: the Netlify build does not download a browser, so it cannot draw them. `*.png` is git-ignored except under `public/`.
+
 ## Deploy on Netlify
 
 `index.html` is an Artifact fragment (no `<html>`, no `<head>`) and its list lives in the Artifact runtime's database. For Netlify, `index.html` stays as it is and the build adds what is missing:
@@ -113,7 +130,7 @@ Chromium is expected at the Playwright default location (`PLAYWRIGHT_BROWSERS_PA
 1. `npm run build` (`scripts/build.mjs`) writes `dist/index.html`: a full HTML page with the title and styles in `<head>`, plus `scripts/netlify-db-shim.js`, which provides the same `claude.use('db')` and `claude.use('downloads')` the page already calls. The shim stores the list through `GET`/`PUT /api/db/tracker/list`; "download" is an ordinary browser download.
 2. `netlify/functions/db.mjs` answers `/api/db/*` and keeps the document in the `docs` table of [Netlify Database](https://docs.netlify.com/build/data-and-storage/netlify-database/) (managed Postgres). Only the `tracker/list` document is accepted, up to 256 KB.
 3. `netlify/database/migrations/` creates the table. Netlify applies migrations automatically before every production deploy and deploy preview. Each deploy preview gets its own database branch seeded from production, so previews never touch the live list.
-4. `netlify/edge-functions/auth.mjs` puts the site behind one shared password, so Netlify's own site password (a Pro plan feature) is not needed. It runs before everything else, so it guards the page and `/api/db/*` alike. The browser asks for the password once with its own login box (HTTP Basic Auth); the username is ignored, so anything works. The password is the `SITE_PASSWORD` environment variable, never part of the repository.
+4. `netlify/edge-functions/auth.mjs` puts the site behind one shared password, so Netlify's own site password (a Pro plan feature) is not needed. It runs before everything else, so it guards the page and `/api/db/*` alike (only the manifest and the app icons are left open, see [Install as an app](#install-as-an-app-mac)). The browser asks for the password once with its own login box (HTTP Basic Auth); the username is ignored, so anything works. The password is the `SITE_PASSWORD` environment variable, never part of the repository.
 
 To deploy: import the repository in Netlify (build command, publish directory and Node version come from `netlify.toml`). The `@netlify/database` dependency is what makes Netlify provision the database on the first deploy. Netlify Database is available on credit-based plans only.
 

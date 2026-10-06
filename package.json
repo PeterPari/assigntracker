@@ -11,12 +11,14 @@
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs && npx netlify-cli dev",
     "db:migrate": "npx netlify-cli database migrations apply",
-    "test": "node --test tests/logic.test.mjs tests/e2e.test.mjs tests/api.test.mjs tests/netlify.test.mjs tests/auth.test.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "test": "node --test tests/logic.test.mjs tests/e2e.test.mjs tests/api.test.mjs tests/netlify.test.mjs tests/auth.test.mjs tests/pwa.test.mjs",
     "test:logic": "node --test tests/logic.test.mjs",
     "test:e2e": "node --test tests/e2e.test.mjs",
     "test:api": "node --test tests/api.test.mjs",
     "test:netlify": "node --test tests/netlify.test.mjs",
-    "test:auth": "node --test tests/auth.test.mjs"
+    "test:auth": "node --test tests/auth.test.mjs",
+    "test:pwa": "node --test tests/pwa.test.mjs"
   },
   "dependencies": {
     "@netlify/database": "^2.0.1"

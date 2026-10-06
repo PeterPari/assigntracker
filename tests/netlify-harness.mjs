@@ -3,7 +3,7 @@
 // with the headers from netlify.toml. No mocks of our own code.
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NetlifyDB } from '@netlify/database-dev';
 import { getDatabase } from '@netlify/database';
@@ -26,6 +26,16 @@ export async function startTestDb() {
   };
 }
 
+const TYPES = { '.html': 'text/html; charset=utf-8', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
+
+/** A file of the build output, or null. Only plain paths below outDir with a known extension. */
+function fromDist(outDir, pathname) {
+  const type = TYPES[extname(pathname)];
+  const rel = normalize(decodeURIComponent(pathname)).replace(/^\/+/, '');
+  if (!type || rel.startsWith('..')) return null;
+  try { return new Response(readFileSync(join(outDir, rel)), { headers: { 'content-type': type } }); } catch { return null; }
+}
+
 /** The `[[headers]] for = "/*"` values from netlify.toml, so the tests run under the real CSP. */
 export function siteHeaders() {
   const toml = readFileSync(join(root, 'netlify.toml'), 'utf8');
@@ -34,8 +44,9 @@ export function siteHeaders() {
 }
 
 /**
- * Serves the built page at / and the API at /api/db/*. `server.intercept` (set by a test) may return a Response
- * to stand in for the function, e.g. a 503, and sees every API request: `server.calls` records method + path.
+ * Serves the built page at /, the other files of dist/ (manifest, icons) at their paths, and the API at /api/db/*.
+ * `server.intercept` (set by a test) may return a Response to stand in for the function, e.g. a 503, and sees every
+ * API request: `server.calls` records method + path.
  */
 export async function startSite(db, outDir) {
   build(outDir);
@@ -58,7 +69,7 @@ export async function startSite(db, outDir) {
       } else if (url.pathname === '/') {
         res = new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8' } });
       } else {
-        res = new Response('not found', { status: 404 });
+        res = fromDist(outDir, url.pathname) ?? new Response('not found', { status: 404 });
       }
       const out = { ...headers };
       res.headers.forEach((v, k) => { out[k] = v; });

@@ -115,3 +115,50 @@ test('the edge function does not let anything through when SITE_PASSWORD is not 
   assert.equal(res.status, 503);
   assert.deepEqual(ran, []);
 });
+
+// Browsers fetch the manifest and the app icons without the page's credentials when they install the site as an
+// app, so these exact paths are served without the password. Nothing else is.
+const PUBLIC = ['/manifest.webmanifest', '/apple-touch-icon.png', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png'];
+
+test('the manifest and the app icons are served without the password, with a wrong one, and with the right one', async () => {
+  envPassword = PASSWORD;
+  for (const path of PUBLIC) {
+    for (const auth of [undefined, basic('peter', 'wrong'), basic('peter', PASSWORD)]) {
+      ran.length = 0;
+      const res = await edge(req(auth, 'https://site.test' + path), context);
+      assert.equal(await res.text(), 'the page', path);
+      assert.deepEqual(ran, ['next'], path);
+    }
+  }
+});
+
+test('only those exact paths are open: look-alikes, other files and the API still need the password', async () => {
+  envPassword = PASSWORD;
+  const closed = [
+    '/', '/index.html', '/api/db/tracker/list', '/icons/', '/icons/other.png', '/icons/icon-192.png/', '/icons/icon-192.png/x',
+    '/manifest.webmanifest/x', '/manifest.webmanifest.map', '/Manifest.webmanifest', '/icons/../index.html', '/icons/%2e%2e/index.html',
+    '/apple-touch-icon-precomposed.png', '/favicon.ico', '/icons/icon-192.png%00.html',
+  ];
+  for (const path of closed) {
+    ran.length = 0;
+    await assertChallenge(await edge(req(undefined, 'https://site.test' + path), context));
+    assert.deepEqual(ran, [], `${path} reached the site without the password`);
+  }
+  // a query string does not change the path, so it opens nothing more either way
+  ran.length = 0;
+  assert.equal(await (await edge(req(undefined, 'https://site.test/manifest.webmanifest?v=2'), context)).text(), 'the page');
+  ran.length = 0;
+  await assertChallenge(await edge(req(undefined, 'https://site.test/?/manifest.webmanifest'), context));
+  assert.deepEqual(ran, []);
+});
+
+test('the open paths are served even when SITE_PASSWORD is not set, and everything else stays closed with a 503', async () => {
+  envPassword = undefined;
+  ran.length = 0;
+  assert.equal(await (await edge(req(undefined, 'https://site.test/apple-touch-icon.png'), context)).text(), 'the page');
+  assert.deepEqual(ran, ['next']);
+  ran.length = 0;
+  const res = await edge(req(undefined, 'https://site.test/'), context);
+  assert.equal(res.status, 503);
+  assert.deepEqual(ran, []);
+});

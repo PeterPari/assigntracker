@@ -1,7 +1,8 @@
 // Builds the Netlify site: dist/index.html = index.html (a Claude Artifact fragment) made into a full page,
-// plus the shim that replaces the Artifact runtime. index.html itself is not touched.
+// plus the shim that replaces the Artifact runtime, plus everything in public/ (the web app manifest and the icons
+// that make the site installable as an app). index.html itself is not touched.
 //   node scripts/build.mjs [outDir]
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,6 +31,10 @@ export function buildPage(source, shim) {
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#13151a">
 <link rel="icon" href="${ICON}">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Assignments">
 ${title[0]}
 ${style[0]}
 <script>
@@ -50,6 +55,7 @@ export function build(outDir = join(root, 'dist')) {
   );
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, 'index.html'), page);
+  cpSync(join(root, 'public'), outDir, { recursive: true });
   return page;
 }
 

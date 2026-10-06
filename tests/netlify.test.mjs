@@ -71,8 +71,10 @@ test('the built page is a complete document, loads under the site CSP, and reads
       title: document.head.querySelector('title')?.textContent,
       styleInHead: !!document.head.querySelector('style'),
       icon: !!document.head.querySelector('link[rel=icon]'),
+      manifest: document.head.querySelector('link[rel=manifest]')?.getAttribute('href'),
+      touchIcon: document.head.querySelector('link[rel=apple-touch-icon]')?.getAttribute('href'),
     }));
-    assert.deepEqual(doc, { doctype: 'html', charset: 'UTF-8', lang: 'en', viewport: 'width=device-width, initial-scale=1, viewport-fit=cover', title: 'Assignment Tracker', styleInHead: true, icon: true });
+    assert.deepEqual(doc, { doctype: 'html', charset: 'UTF-8', lang: 'en', viewport: 'width=device-width, initial-scale=1, viewport-fit=cover', title: 'Assignment Tracker', styleInHead: true, icon: true, manifest: '/manifest.webmanifest', touchIcon: '/apple-touch-icon.png' });
     assert.equal(await page.textContent('#pct'), '0%');
     assert.equal(await warnShown(page), false, 'no warning icon: the database answered');
     assert.deepEqual(errors, [], 'no console, page or CSP errors');
@@ -81,6 +83,57 @@ test('the built page is a complete document, loads under the site CSP, and reads
     assert.match(res.headers.get('content-security-policy'), /default-src 'self'/);
     assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
   });
+});
+
+test('the manifest and every icon load under the site CSP, with no console errors', async () => {
+  await withSite({}, async (page, errors) => {
+    const cdp = await page.context().newCDPSession(page);
+    const { url, errors: manifestErrors, data } = await cdp.send('Page.getAppManifest');
+    assert.equal(url, site.url + 'manifest.webmanifest');
+    assert.deepEqual(manifestErrors, []);
+    const manifest = JSON.parse(data);
+    assert.equal(manifest.name, 'Assignment Tracker');
+    assert.equal(manifest.display, 'standalone');
+    const icons = await page.evaluate(async () => Promise.all(
+      [document.querySelector('link[rel=apple-touch-icon]').href, ...(await (await fetch('/manifest.webmanifest')).json()).icons.map((i) => new URL(i.src, location.href).href)]
+        .map(async (href) => {
+          const res = await fetch(href);
+          const bitmap = await createImageBitmap(await res.blob());
+          return [new URL(href).pathname, res.status, res.headers.get('content-type'), bitmap.width, bitmap.height];
+        }),
+    ));
+    assert.deepEqual(icons, [
+      ['/apple-touch-icon.png', 200, 'image/png', 512, 512],
+      ['/icons/icon-192.png', 200, 'image/png', 192, 192],
+      ['/icons/icon-512.png', 200, 'image/png', 512, 512],
+      ['/icons/icon-maskable-512.png', 200, 'image/png', 512, 512],
+    ]);
+    assert.deepEqual(errors, [], 'no console, page or CSP errors');
+  });
+});
+
+// Chromium's own "can this be installed?" check (the one behind Chrome's Install button) only runs in the full
+// browser with a real profile: the headless shell and incognito-style contexts report nothing at all.
+test('Chromium says the built site can be installed as an app (and says why not for a page without a manifest)', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'assigntracker-profile-'));
+  const ctx = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true });
+  try {
+    const check = async (url) => {
+      const page = await ctx.newPage();
+      try {
+        const cdp = await ctx.newCDPSession(page);
+        await cdp.send('Page.enable');
+        await page.goto(url);
+        await cdp.send('Page.getAppManifest'); // makes Chromium fetch the manifest before it is judged
+        return (await cdp.send('Page.getInstallabilityErrors')).installabilityErrors.map((e) => e.errorId);
+      } finally { await page.close(); }
+    };
+    assert.deepEqual(await check(site.url + 'no-such-page'), ['no-manifest'], 'the check is live: it does flag a page without a manifest');
+    assert.deepEqual(await check(site.url), [], 'nothing stops the site from being installed');
+  } finally {
+    await ctx.close();
+    rmSync(profile, { recursive: true, force: true });
+  }
 });
 
 test('a new row is saved in the database and is there after a reload', async () => {
