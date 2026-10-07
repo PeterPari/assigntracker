@@ -53,6 +53,12 @@ svg { display: block; flex: none; }
 .ib.on { color: var(--accent); background: var(--accent-bg); }
 .ib.warn { color: var(--st-prog); cursor: default; }
 
+/* hamburger menu: a small column of toggles under the hamburger */
+.mp { position: absolute; top: 30px; right: 32px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+.mp .ib:hover { background: rgba(255, 255, 255, .08); }
+.mp .ib.on:hover { background: var(--accent-bg); }
+.msep { width: 18px; height: 1px; margin: 2px 0; background: var(--line-2); }
+
 /* rows */
 #list { display: flex; flex-direction: column; gap: 2px; }
 .row {
@@ -73,11 +79,24 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .s1 .st { color: var(--st-prog); }
 .s2 .st { color: var(--st-done); }
 
-.nm { flex: 1; min-width: 0; height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 5px; cursor: text; }
-.nm:focus-within { background: var(--raised); box-shadow: inset 0 0 0 1px var(--accent); }
-.nmi { width: 100%; text-overflow: ellipsis; pointer-events: none; user-select: text; -webkit-user-select: text; }
-.nm:focus-within .nmi { pointer-events: auto; }
-.row.done .nmi, .row.done .dv, .row.done .sv, .row.done .ec { color: var(--done-text); }
+.nm, .tf { min-width: 0; height: 24px; align-items: center; padding: 0 6px; border-radius: 5px; cursor: text; }
+.nm { flex: 1; min-width: 88px; display: flex; }
+.nm:focus-within, .tf:focus-within { background: var(--raised); box-shadow: inset 0 0 0 1px var(--accent); }
+.nmi, .tfi { width: 100%; text-overflow: ellipsis; pointer-events: none; user-select: text; -webkit-user-select: text; }
+.nm:focus-within .nmi, .tf:focus-within .tfi { pointer-events: auto; }
+.row.done .nmi, .row.done .tfi, .row.done .ddi, .row.done .dv, .row.done .sv, .row.done .ec { color: var(--done-text); }
+
+/* optional columns: subject, due date, assignment type (shown from the menu) */
+.cs, .cd, .ct { display: none; }
+.cs, .ct { flex: 0 1 110px; min-width: 56px; } /* narrow windows squeeze these before the name */
+.cd { flex: none; width: 128px; }
+#list.c-subject .cs, #list.c-type .ct { display: flex; }
+#list.c-due .cd { display: block; }
+.ddi { width: 100%; height: 24px; padding: 0 4px 0 6px; border-radius: 5px; color-scheme: dark; font-variant-numeric: tabular-nums; }
+.ddi:hover { background: var(--raised); }
+.ddi:focus { background: var(--raised); box-shadow: inset 0 0 0 1px var(--accent); }
+.ddi.empty { color: var(--muted); }
+.ddi::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
 
 .du { flex: none; display: flex; justify-content: flex-end; min-width: 108px; }
 .dv { display: none; height: 24px; padding: 0 6px; border-radius: 5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -92,7 +111,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 
 .tm { display: none; flex: none; align-items: center; gap: 4px; }
 #list.times .tm { display: flex; }
-.sc { position: relative; display: flex; justify-content: flex-end; min-width: 72px; height: 24px; cursor: text; }
+.sc { position: relative; display: flex; justify-content: flex-end; min-width: 80px; height: 24px; cursor: text; }
 .sg, .sv { display: none; height: 24px; padding: 0 6px; border-radius: 5px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sg { width: 72px; pointer-events: none; }
 .row:not(.has-start):not(.ed-start) .sg { display: block; }
@@ -104,7 +123,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .se input, .ee input { width: 20px; text-align: center; }
 .co { color: var(--muted); }
 .sa, .ea { height: 18px; margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-bg); }
-.ec { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 92px; padding-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ec { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 100px; padding-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ec.blank svg { visibility: hidden; }
 .ev { height: 24px; padding: 0 6px; border-radius: 5px; cursor: default; }
 .ev:not(:disabled) { cursor: text; }
@@ -159,8 +178,15 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
   <div class="hd">
     <div class="bar" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i class="fill" id="fill"></i><b class="pct" id="pct">0%</b></div>
     <span class="ib warn" id="warn" hidden data-tip="Not saved" role="img" aria-label="Not saved"></span>
-    <button class="ib" id="times" type="button"></button>
-    <button class="ib" id="chain" type="button" hidden></button>
+    <button class="ib" id="menu" type="button" data-tip="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false" aria-controls="menuPop"></button>
+    <div class="mp" id="menuPop" role="group" aria-label="Menu" hidden>
+      <button class="ib" id="colSubject" type="button" aria-pressed="false"></button>
+      <button class="ib" id="colDue" type="button" aria-pressed="false"></button>
+      <button class="ib" id="colType" type="button" aria-pressed="false"></button>
+      <span class="msep" aria-hidden="true"></span>
+      <button class="ib" id="times" type="button"></button>
+      <button class="ib" id="chain" type="button" hidden></button>
+    </div>
     <button class="ib" id="reload" type="button" data-tip="Reload" aria-label="Reload"></button>
   </div>
   <div id="list"></div>
@@ -297,12 +323,26 @@ function removeRow(rows, id, chain) {
   return chain ? keepPlan(next, rows[0]) : next;
 }
 
+/** The optional columns, in the order they appear in a row and in the menu. */
+const COLS = ['subject', 'due', 'type'];
+const colsOf = (c) => ({ subject: !!c && c.subject === true, due: !!c && c.due === true, type: !!c && c.type === true });
+
+/** A due date is 'YYYY-MM-DD' and a real day on the calendar; anything else is null. */
+function validDue(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(s + 'T00:00:00Z');
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s ? s : null;
+}
+
 /** What goes into the shared database: finished rows only. */
 function serialize(s) {
-  const rows = s.rows.filter(isComplete).map((r) => ({ id: r.id, name: r.name.trim(), mins: r.mins, status: r.status, start: r.start }));
+  const rows = s.rows.filter(isComplete).map((r) => ({
+    id: r.id, name: r.name.trim(), mins: r.mins, status: r.status, start: r.start,
+    subject: (r.subject || '').trim(), due: r.due || null, type: (r.type || '').trim(),
+  }));
   const head = s.rows[0]; // an unfinished first row hands its start to the first saved row
   if (s.chain && head && !isComplete(head) && head.start != null && rows.length && rows[0].start == null) rows[0] = { ...rows[0], start: head.start };
-  return { v: 1, rows, times: !!s.times, chain: !!s.chain };
+  return { v: 1, rows, times: !!s.times, chain: !!s.chain, cols: colsOf(s.cols) };
 }
 
 function cleanRow(r) {
@@ -315,6 +355,9 @@ function cleanRow(r) {
     mins,
     status: r.status === 1 || r.status === 2 ? r.status : 0,
     start: Number.isInteger(r.start) && r.start >= 0 && r.start < DAY ? r.start : null,
+    subject: typeof r.subject === 'string' ? r.subject.slice(0, 100) : '',
+    due: validDue(r.due),
+    type: typeof r.type === 'string' ? r.type.slice(0, 100) : '',
   };
   return isComplete(row) ? row : null;
 }
@@ -324,7 +367,7 @@ function hydrate(d) {
   const seen = new Set(); // shared data is untrusted: one row per id
   const rows = Array.isArray(d && d.rows) ? d.rows.map(cleanRow).filter((r) => r && !seen.has(r.id) && seen.add(r.id)) : [];
   const chain = !d || d.chain !== false;
-  return { rows, times: !!d && d.times === true, chain };
+  return { rows, times: !!d && d.times === true, chain, cols: colsOf(d && d.cols) };
 }
 /* </logic> */
 
@@ -347,6 +390,10 @@ function hydrate(d) {
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
     share: '<path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>',
+    calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+    tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r=".6" fill="currentColor"/>',
     reload: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
   };
   const icon = (n, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
@@ -358,7 +405,7 @@ function hydrate(d) {
   const STATUS_TIP = ['Not started', 'In progress', 'Done'];
 
   /* ---------- state ---------- */
-  const state = { rows: [], times: false, chain: true };
+  const state = { rows: [], times: false, chain: true, cols: colsOf() };
   let pending = null;       // {id, value}: a lower-row start waiting on the chaining warning
   let touched = false;      // local edits before the stored list arrived
   let settingsTouched = false;
@@ -371,6 +418,11 @@ function hydrate(d) {
   addBtn.innerHTML = icon('plus', 18);
   tWarn.innerHTML = icon('alert', 17);
   $('#reload').innerHTML = icon('reload', 17);
+  $('#menu').innerHTML = icon('menu', 17);
+  const COL_BTN = { subject: $('#colSubject'), due: $('#colDue'), type: $('#colType') };
+  const COL_ICON = { subject: 'book', due: 'calendar', type: 'tag' };
+  const COL_NAME = { subject: 'subject', due: 'due date', type: 'assignment type' };
+  for (const k of COLS) COL_BTN[k].innerHTML = icon(COL_ICON[k], 17);
   clr.innerHTML = icon('trash', 17);
   $('#doneIcon').innerHTML = icon('check', 28);
   $('#doneClose').innerHTML = icon('x', 16);
@@ -380,6 +432,9 @@ function hydrate(d) {
   const ROW_HTML = `
     <button class="st" type="button"></button>
     <div class="nm"><input class="nmi" type="text" maxlength="200" placeholder="Assignment" autocomplete="off" spellcheck="false" aria-label="Assignment"></div>
+    <div class="cs tf" data-tip="Subject"><input class="tfi sbi" type="text" maxlength="100" placeholder="--" autocomplete="off" spellcheck="false" aria-label="Subject"></div>
+    <div class="cd" data-tip="Due date"><input class="ddi" type="date" aria-label="Due date"></div>
+    <div class="ct tf" data-tip="Assignment type"><input class="tfi tyi" type="text" maxlength="100" placeholder="--" autocomplete="off" spellcheck="false" aria-label="Assignment type"></div>
     <div class="du">
       <button class="dv" type="button" data-tip="Duration"></button>
       <div class="de" data-tip="Duration">
@@ -430,6 +485,13 @@ function hydrate(d) {
     st.setAttribute('aria-label', STATUS_TIP[r.status]);
     const nmi = $('.nmi', el);
     if (document.activeElement !== nmi) nmi.value = r.name;
+    for (const [cls, f] of [['.sbi', 'subject'], ['.tyi', 'type']]) {
+      const inp = $(cls, el);
+      if (document.activeElement !== inp) inp.value = r[f];
+    }
+    const dd = $('.ddi', el);
+    if (document.activeElement !== dd) dd.value = r.due || '';
+    dd.classList.toggle('empty', !r.due);
     $('.dv', el).textContent = fmtDur(r.mins);
     const isPend = pending && pending.id === r.id;
     const shown = isPend ? pending.value : s.start;
@@ -449,6 +511,14 @@ function hydrate(d) {
     const ids = new Set(state.rows.map((r) => r.id));
     for (const [id, el] of els) if (!ids.has(id)) { el.remove(); els.delete(id); }
     list.classList.toggle('times', state.times);
+    for (const k of COLS) {
+      const on = state.cols[k], b = COL_BTN[k];
+      list.classList.toggle('c-' + k, on);
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', String(on));
+      b.dataset.tip = (on ? 'Hide ' : 'Show ') + COL_NAME[k];
+      b.setAttribute('aria-label', b.dataset.tip);
+    }
     state.rows.forEach((r, i) => {
       let el = els.get(r.id);
       if (!el) { el = makeRow(r.id); els.set(r.id, el); }
@@ -492,6 +562,21 @@ function hydrate(d) {
   function cancelName(el) {
     const r = rowOf(el.dataset.id), inp = $('.nmi', el);
     inp.value = r ? r.name : '';
+    inp.blur();
+  }
+
+  /* ---------- subject and assignment type: plain text, may be empty ---------- */
+  const textField = (inp) => (inp.classList.contains('sbi') ? 'subject' : 'type');
+  function commitText(inp) {
+    const id = inp.closest('.row').dataset.id, r = rowOf(id);
+    if (!r) return;
+    const f = textField(inp), v = inp.value.trim();
+    inp.value = v;
+    if (v !== r[f]) patch(id, { [f]: v });
+  }
+  function cancelText(inp) {
+    const r = rowOf(inp.closest('.row').dataset.id);
+    inp.value = r ? r[textField(inp)] : '';
     inp.blur();
   }
 
@@ -818,7 +903,7 @@ function hydrate(d) {
     else if (t.closest('.px')) cancelPending();
     else if (t.closest('.sa, .ea')) { const k = t.closest('.ea') ? 'end' : 'start'; setAp(el, k, $(TE[k].a, el).textContent === 'AM' ? 'PM' : 'AM'); }
     else if (t.closest('.ev')) { if (!el._ed) openEnd(el); }
-    else if (t.closest('.nm')) { const i = $('.nmi', el); if (document.activeElement !== i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+    else if (t.closest('.nm, .tf')) { const i = $('.nmi, .tfi', t.closest('.nm, .tf')); if (document.activeElement !== i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
     else if (t.closest('.du')) { if (!el._ed && el.classList.contains('has-dur')) openDur(el); }
     else if (t.closest('.sc') && !t.closest('.pop')) { if (!el._ed && !(pending && pending.id === id)) openStart(el); }
   });
@@ -834,6 +919,7 @@ function hydrate(d) {
     if (!el) return;
     const to = e.relatedTarget;
     if (e.target.matches('.nmi')) commitName(el, false);
+    else if (e.target.matches('.tfi')) commitText(e.target);
     else if (e.target.closest('.de')) { if (!(to && $('.de', el).contains(to))) commitDur(el, false); }
     else if (e.target.closest('.se')) { if (!(to && $('.se', el).contains(to))) commitStart(el); }
     else if (e.target.closest('.ee')) { if (!(to && $('.ee', el).contains(to))) commitEnd(el); }
@@ -847,6 +933,9 @@ function hydrate(d) {
     } else if (t.matches('.nmi')) {
       if (e.key === 'Enter') { e.preventDefault(); commitName(el, true); }
       else if (e.key === 'Escape') cancelName(el);
+    } else if (t.matches('.tfi')) {
+      if (e.key === 'Enter') { e.preventDefault(); t.blur(); }
+      else if (e.key === 'Escape') cancelText(t);
     } else if (t.closest('.de')) {
       if (e.key === 'Enter') { e.preventDefault(); commitDur(el, true); }
       else if (e.key === 'Escape') cancelDur(el);
@@ -857,6 +946,10 @@ function hydrate(d) {
       else if (/^[ap]$/i.test(e.key)) { e.preventDefault(); setAp(el, k, e.key.toLowerCase() === 'a' ? 'AM' : 'PM'); }
       else if (e.key === ':' && t.matches(c.h)) { e.preventDefault(); $(c.n, el).focus(); $(c.n, el).select(); }
     }
+  });
+
+  list.addEventListener('change', (e) => {
+    if (e.target.matches('.ddi')) patch(e.target.closest('.row').dataset.id, { due: validDue(e.target.value) });
   });
 
   list.addEventListener('input', (e) => {
@@ -883,6 +976,28 @@ function hydrate(d) {
     commit();
   });
 
+  for (const k of COLS) {
+    COL_BTN[k].addEventListener('click', () => {
+      settingsTouched = true;
+      state.cols = { ...state.cols, [k]: !state.cols[k] };
+      commit();
+    });
+  }
+
+  /* The menu stays open while several toggles are changed; it closes on an outside click, Esc, or tabbing away. */
+  const menuBtn = $('#menu'), menuPop = $('#menuPop');
+  function setMenu(open, refocus) {
+    menuPop.hidden = !open;
+    menuBtn.classList.toggle('on', open);
+    menuBtn.setAttribute('aria-expanded', String(open));
+    if (!open && refocus) menuBtn.focus();
+  }
+  menuBtn.addEventListener('click', () => setMenu(menuPop.hidden));
+  menuPop.addEventListener('focusout', (e) => {
+    const to = e.relatedTarget;
+    if (to && !menuPop.contains(to) && to !== menuBtn) setMenu(false);
+  });
+
   function addRow() {
     const last = state.rows[state.rows.length - 1];
     if (last && !isComplete(last)) { // one unfinished row at a time
@@ -890,7 +1005,7 @@ function hydrate(d) {
       if (!last.name.trim()) $('.nmi', el).focus(); else $('.dh', el).focus();
       return;
     }
-    const r = { id: uid(), name: '', mins: 0, status: 0, start: null };
+    const r = { id: uid(), name: '', mins: 0, status: 0, start: null, subject: '', due: null, type: '' };
     state.rows = state.rows.concat(r);
     touched = true;
     render();
@@ -929,10 +1044,12 @@ function hydrate(d) {
   document.addEventListener('pointerdown', (e) => {
     if (pending && !e.target.closest('.pop')) cancelPending();
     if (armed && !e.target.closest('#clear')) disarm();
+    if (!menuPop.hidden && !e.target.closest('#menuPop, #menu')) setMenu(false);
   }, true);
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     closeDone();
+    if (!menuPop.hidden) setMenu(false, true);
     if (pending) cancelPending();
     if (armed) disarm();
   });
@@ -1121,14 +1238,14 @@ function hydrate(d) {
       }
     } catch (_) { snap = null; }
     if (!snap) { setWarn(true); return; } // never write over a list that could not be read
-    const remote = snap.exists ? hydrate(snap.data()) : { rows: [], times: false, chain: true };
+    const remote = hydrate(snap.exists ? snap.data() : null);
     if (touched) {
       const mine = state.rows.filter((r) => !remote.rows.some((x) => x.id === r.id));
-      if (!settingsTouched) { state.times = remote.times; state.chain = remote.chain; }
+      if (!settingsTouched) { state.times = remote.times; state.chain = remote.chain; state.cols = remote.cols; }
       state.rows = remote.rows.concat(mine);
       if (state.chain) state.rows = chainOn(state.rows);
     } else {
-      state.rows = remote.rows; state.times = remote.times; state.chain = remote.chain;
+      state.rows = remote.rows; state.times = remote.times; state.chain = remote.chain; state.cols = remote.cols;
     }
     lastJson = JSON.stringify(serialize(remote));
     canSave = true;

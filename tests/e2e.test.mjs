@@ -22,6 +22,8 @@ const saved = (page) => page.evaluate(() => window.__db.store['tracker/list']);
 const settle = (page) => page.waitForTimeout(650); // debounce + write
 const setNow = (page, h, m) => page.evaluate(([a, b]) => window.__setNow(a, b), [h, m]);
 const pct = (page) => page.textContent('#pct');
+const openMenu = async (page) => { if (await page.locator('#menuPop').isHidden()) await page.click('#menu'); };
+const toggle = async (page, sel) => { await openMenu(page); await page.click(sel); };
 
 async function addRow(page, name, h, m) {
   await page.click('#add');
@@ -38,8 +40,9 @@ test('opens empty: 0% bar, add button, no rows', async () => {
     assert.equal(await pct(page), '0%');
     assert.equal(await page.locator('.row').count(), 0);
     assert.equal(await page.locator('#add').isVisible(), true);
-    assert.equal(await page.locator('#times').isVisible(), true);
-    assert.equal(await page.locator('#chain').isVisible(), false, 'chaining toggle only matters while times are shown');
+    assert.equal(await page.locator('#menu').isVisible(), true);
+    assert.equal(await page.locator('#menuPop').isVisible(), false, 'the menu starts closed');
+    for (const id of ['#times', '#chain', '#colSubject', '#colDue', '#colType']) assert.equal(await page.locator(id).isVisible(), false, `${id} lives in the menu`);
   });
 });
 
@@ -230,12 +233,12 @@ test('times are hidden by default and shown on toggle; start/end/12-hour', async
     });
     assert.equal(await visibleTimes(), false, 'no times anywhere while off');
     assert.equal(await page.getAttribute('#times', 'aria-pressed'), 'false');
-    await page.click('#times');
+    await toggle(page, '#times');
     assert.deepEqual(await rowsText(page, '.sv'), ['3:30 PM', '4:00 PM', '5:30 PM']);
     assert.deepEqual(await rowsText(page, '.ev'), ['4:00 PM', '5:30 PM', '8:00 PM']);
-    await page.click('#times');
+    await toggle(page, '#times');
     assert.equal(await visibleTimes(), false);
-    await page.click('#times');
+    await toggle(page, '#times');
     assert.deepEqual(await rowsText(page, '.sv'), ['3:30 PM', '4:00 PM', '5:30 PM'], 'entered start survives off and on');
   });
 });
@@ -419,9 +422,9 @@ test('unchained: every row has its own start, blank start means blank end, own s
 test('turning chaining on discards lower starts and recomputes from the first row', async () => {
   const rows = [R('a', 'a', 30, { start: H(9) }), R('b', 'b', 60, { start: H(13) }), R('c', 'c', 45, { start: H(14) })];
   await withPage({ initial: doc(rows, { times: true, chain: false }) }, async (page) => {
-    await page.click('#chain');
+    await toggle(page, '#chain');
     assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '9:30 AM', '10:30 AM']);
-    await page.click('#chain'); // off again: the discarded starts do not come back
+    await toggle(page, '#chain'); // off again: the discarded starts do not come back
     assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '', '']);
     await settle(page);
     assert.deepEqual((await saved(page)).rows.map((r) => r.start), [H(9), null, null]);
@@ -519,7 +522,7 @@ test('persistence: list loads on open; toggles persist; a second viewer sees the
     assert.deepEqual(await rowsText(page, '.sv'), ['8:00 AM', '9:00 AM']);
     assert.equal(await page.getAttribute('#times', 'aria-pressed'), 'true');
     assert.equal(await page.locator('#warn').isVisible(), false, 'no save warning while healthy');
-    await page.click('#chain');
+    await toggle(page, '#chain');
     await settle(page);
     const stored = await saved(page);
     assert.equal(stored.chain, false);
@@ -650,6 +653,7 @@ test('tooltips: nothing on a quick hover, short text after a long hover, every i
   const rows = [R('a', 'a', 30, { start: H(9) }), R('b', 'b', 30)];
   await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
     const tipText = () => page.evaluate(() => { const t = document.querySelector('#tip'); return t.classList.contains('show') ? t.textContent : null; });
+    await openMenu(page);
     await page.hover('#times');
     await page.waitForTimeout(350);
     assert.equal(await tipText(), null, 'not yet');
@@ -680,6 +684,7 @@ test('only allowed text is visible: placeholders, units, clock text, percent, to
     await page.keyboard.type('5:00');
     await page.keyboard.press('Enter'); // opens the popup
     await page.click('#add');
+    for (const id of ['#colSubject', '#colDue', '#colType']) await toggle(page, id); // the menu stays open, every column shows
     const stray = await page.evaluate(() => {
       const user = new Set([...document.querySelectorAll('.nmi')].map((i) => i.value).filter(Boolean));
       const out = [];
@@ -927,7 +932,7 @@ test('done: times hidden, finished early, or finished in the same minute leave t
     await page.click('.row .st');
     assert.deepEqual(await rowsText(page, '.dv'), ['1 hr'], 'times off: nothing hidden is rewritten');
     await page.keyboard.press('Escape'); // all-done popup
-    await page.click('#times');
+    await toggle(page, '#times');
     assert.deepEqual(await rowsText(page, '.ev'), ['10:00 AM']);
   });
   await withPage({ initial: doc([R('a', 'a', 60)], { times: true }), now: [13, 0] }, async (page) => {
@@ -1073,9 +1078,9 @@ test('cuts survive a reload, and turning chaining off and on again discards them
     try {
       assert.deepEqual(await rowsText(other, '.sv'), ['9:00 AM', '10:35 AM', '11:35 AM']);
     } finally { await ctx.close(); }
-    await page.click('#chain'); // off: every row has only its own start
+    await toggle(page, '#chain'); // off: every row has only its own start
     assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:35 AM', '']);
-    await page.click('#chain'); // on: lower starts discarded, recomputed from the first row
+    await toggle(page, '#chain'); // on: lower starts discarded, recomputed from the first row
     assert.deepEqual(await rowsText(page, '.sv'), ['9:00 AM', '10:00 AM', '11:00 AM']);
   });
 });
@@ -1129,7 +1134,7 @@ test('in progress: unchained rows each get their own start', async () => {
 test('in progress: nothing is recorded while times are hidden', async () => {
   await withPage({ initial: doc([R('a', 'a', 60, { start: H(8) })], { times: false }), now: [9, 10] }, async (page) => {
     await page.click('.row .st');
-    await page.click('#times');
+    await toggle(page, '#times');
     assert.deepEqual(await rowsText(page, '.sv'), ['8:00 AM']);
   });
 });
@@ -1524,5 +1529,162 @@ test('share: the button works from the keyboard', async () => {
     await page.keyboard.press('Escape');
     assert.equal(await popup(page), null);
     assert.deepEqual(await shareState(page), { tip: 'Share', label: 'Share', ok: false, bad: false }, 'closing resets the button');
+  });
+});
+
+const ALL_COLS = { cols: { subject: true, due: true, type: true } };
+
+test('menu: the hamburger opens a drop-down that closes on a second click, an outside click, Esc, or tabbing away', async () => {
+  await withPage({}, async (page) => {
+    const open = () => page.locator('#menuPop').isVisible();
+    assert.equal(await page.getAttribute('#menu', 'aria-expanded'), 'false');
+    await page.click('#menu');
+    assert.equal(await open(), true);
+    assert.equal(await page.getAttribute('#menu', 'aria-expanded'), 'true');
+    await page.click('#menu');
+    assert.equal(await open(), false, 'the hamburger closes it again');
+    await page.click('#menu');
+    await page.mouse.click(500, 400);
+    assert.equal(await open(), false, 'an outside click closes it');
+    await page.click('#menu');
+    await page.keyboard.press('Escape');
+    assert.equal(await open(), false, 'Esc closes it');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'menu', 'and focus returns to the hamburger');
+    await page.click('#menu');
+    await page.click('#colSubject');
+    await page.click('#colDue');
+    assert.equal(await open(), true, 'it stays open while several toggles are changed');
+    await page.focus('#times'); // the last item while chaining is hidden
+    await page.keyboard.press('Tab');
+    assert.equal(await open(), false, 'tabbing out of it closes it');
+  });
+});
+
+test('menu: five icon-only toggles, each with a tip; chaining only while times are on; reload stays last in the header', async () => {
+  await withPage({}, async (page) => {
+    await page.click('#menu');
+    for (const [id, tip] of [['#colSubject', 'subject'], ['#colDue', 'due date'], ['#colType', 'assignment type']]) {
+      assert.equal((await page.textContent(id)).trim(), '', 'an icon, no words');
+      assert.equal(await page.locator(`${id} svg`).count(), 1);
+      assert.equal(await page.getAttribute(id, 'data-tip'), `Show ${tip}`);
+      assert.equal(await page.getAttribute(id, 'aria-pressed'), 'false');
+      await page.click(id);
+      assert.equal(await page.getAttribute(id, 'data-tip'), `Hide ${tip}`);
+      assert.equal(await page.getAttribute(id, 'aria-label'), `Hide ${tip}`);
+      assert.equal(await page.getAttribute(id, 'aria-pressed'), 'true');
+    }
+    assert.equal(await page.locator('#chain').isVisible(), false, 'chaining only matters while times are shown');
+    await page.click('#times');
+    assert.equal(await page.locator('#chain').isVisible(), true);
+    assert.equal(await page.$eval('.hd', (h) => h.lastElementChild.id), 'reload');
+    const box = async (sel) => (await page.locator(sel).boundingBox());
+    const hb = await box('#menu'), pb = await box('#menuPop');
+    assert.ok(pb.y > hb.y + hb.height - 1, 'the drop-down sits under the hamburger');
+    assert.ok(Math.abs((pb.x + pb.width) - (hb.x + hb.width)) <= 6, 'and lines up with its right edge');
+  });
+});
+
+test('columns: hidden until switched on, then shown left to right as subject, due date, type after the name', async () => {
+  const rows = [R('a', 'One', 30, { subject: 'Math', due: '2026-10-14', type: 'Quiz' })];
+  await withPage({ initial: doc(rows) }, async (page) => {
+    for (const c of ['.cs', '.cd', '.ct']) assert.equal(await page.locator(`.row ${c}`).isVisible(), false, `${c} is hidden by default`);
+    await toggle(page, '#colSubject');
+    assert.equal(await page.locator('.row .cs').isVisible(), true);
+    assert.equal(await page.locator('.row .cd').isVisible(), false);
+    assert.equal(await page.inputValue('.row .sbi'), 'Math');
+    await toggle(page, '#colDue');
+    assert.equal(await page.inputValue('.row .ddi'), '2026-10-14');
+    await toggle(page, '#colType');
+    assert.equal(await page.inputValue('.row .tyi'), 'Quiz');
+    const lefts = await page.$$eval('.row .nm, .row .cs, .row .cd, .row .ct, .row .du', (els) => els.map((e) => e.getBoundingClientRect().left));
+    assert.deepEqual([...lefts].sort((a, b) => a - b), lefts, 'name, subject, due date, type, duration');
+    await toggle(page, '#colSubject');
+    assert.equal(await page.locator('.row .cs').isVisible(), false, 'switching off hides it again');
+    await settle(page);
+    assert.deepEqual((await saved(page)).cols, { subject: false, due: true, type: true });
+  });
+});
+
+test('columns: subject and type are edited in place, the due date with its date input, and all of it is saved', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30), R('b', 'Two', 20)], ALL_COLS) }, async (page) => {
+    await page.click('.row:nth-child(1) .cs');
+    await page.keyboard.type('  Math ');
+    await page.keyboard.press('Enter');
+    await page.click('.row:nth-child(1) .ct');
+    await page.keyboard.type('Quiz');
+    await page.keyboard.press('Tab');
+    await page.fill('.row:nth-child(1) .ddi', '2026-10-14');
+    await settle(page);
+    let d = await saved(page);
+    assert.deepEqual(d.rows.map((r) => [r.subject, r.due, r.type]), [['Math', '2026-10-14', 'Quiz'], ['', null, '']], 'text is trimmed; rows without values stay empty');
+    assert.deepEqual(d.cols, { subject: true, due: true, type: true });
+    assert.equal(await page.inputValue('.row:nth-child(1) .sbi'), 'Math');
+
+    await page.click('.row:nth-child(1) .cs');
+    await page.keyboard.type('zzz');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.inputValue('.row:nth-child(1) .sbi'), 'Math', 'Esc cancels the edit');
+    await page.click('.row:nth-child(1) .cs');
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Enter');
+    await page.fill('.row:nth-child(1) .ddi', '');
+    await settle(page);
+    d = await saved(page);
+    assert.deepEqual([d.rows[0].subject, d.rows[0].due, d.rows[0].type], ['', null, 'Quiz'], 'text and date can be emptied again');
+    assert.equal(await page.locator('.row:nth-child(1) .ddi.empty').count(), 1);
+  });
+});
+
+test('columns: a second viewer sees the same choices and values; an old document opens with every column hidden', async () => {
+  const rows = [R('a', 'One', 30, { subject: 'Math', due: '2026-10-14', type: 'Quiz' })];
+  await withPage({ initial: doc(rows, { cols: { subject: true, due: false, type: true } }) }, async (page) => {
+    assert.deepEqual(await page.$$eval('.row .cs, .row .cd, .row .ct', (els) => els.map((e) => e.offsetParent !== null)), [true, false, true]);
+    await toggle(page, '#colDue');
+    await settle(page);
+    const stored = await saved(page);
+    const { ctx, page: other } = await openPage(browser, { initial: { 'tracker/list': stored } });
+    try {
+      assert.deepEqual(await other.$$eval('.row .cs, .row .cd, .row .ct', (els) => els.map((e) => e.offsetParent !== null)), [true, true, true]);
+      assert.deepEqual(await other.$$eval('.row .sbi, .row .ddi, .row .tyi', (els) => els.map((e) => e.value)), ['Math', '2026-10-14', 'Quiz']);
+    } finally { await ctx.close(); }
+  });
+  const old = { 'tracker/list': { v: 1, times: false, chain: true, rows: [{ id: 'a', name: 'Old', mins: 30, status: 1, start: null }] } };
+  await withPage({ initial: old }, async (page) => {
+    assert.deepEqual(await names(page), ['Old']);
+    for (const c of ['.cs', '.cd', '.ct']) assert.equal(await page.locator(`.row ${c}`).isVisible(), false);
+    await toggle(page, '#colType');
+    await settle(page);
+    const d = await saved(page);
+    assert.deepEqual([d.rows[0].subject, d.rows[0].due, d.rows[0].type], ['', null, ''], 'the old row gains empty fields');
+    assert.deepEqual(d.cols, { subject: false, due: false, type: true });
+  });
+});
+
+test('columns: a new row starts empty; subject and type do not make a row finished, and an unfinished row is not saved', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)], ALL_COLS) }, async (page) => {
+    await page.click('#add');
+    assert.deepEqual(await page.$$eval('.row:nth-child(2) .sbi, .row:nth-child(2) .ddi, .row:nth-child(2) .tyi', (els) => els.map((e) => e.value)), ['', '', '']);
+    await page.click('.row:nth-child(2) .cs');
+    await page.keyboard.type('Math');
+    await page.keyboard.press('Enter');
+    await settle(page);
+    assert.equal((await saved(page)).rows.length, 1, 'no name and duration yet: not saved');
+  });
+});
+
+test('columns: a row can still be dragged from the subject cell, without editing it', async () => {
+  const rows = [R('a', 'a', 30, { subject: 'x' }), R('b', 'b', 30), R('c', 'c', 30)];
+  await withPage({ initial: doc(rows, { cols: { subject: true, due: false, type: false } }) }, async (page) => {
+    const a = await page.locator('.row:nth-child(1) .cs').boundingBox();
+    const c = await page.locator('.row:nth-child(3)').boundingBox();
+    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(a.x + a.width / 2, a.y + 14, { steps: 4 });
+    await page.mouse.move(a.x + a.width / 2, c.y + c.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    assert.deepEqual(await names(page), ['b', 'c', 'a']);
+    assert.equal(await page.evaluate(() => document.activeElement.tagName), 'BODY', 'nothing is being edited');
   });
 });

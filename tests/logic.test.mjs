@@ -6,9 +6,10 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow };`)();
+const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow, validDue, colsOf };`)();
 
-const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, ...o });
+const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, subject: '', due: null, type: '', ...o });
+const NO_COLS = { subject: false, due: false, type: false };
 const H = (h, m = 0) => h * 60 + m;
 
 test('fmtDur follows the spec examples', () => {
@@ -149,7 +150,7 @@ test('serialize stores finished rows only and carries the anchor', () => {
   assert.equal(out.chain, true);
 });
 test('hydrate round-trips and defends against bad data', () => {
-  const state = { chain: false, times: true, rows: [row('a', 30, { start: H(9), status: 2 }), row('b', 60, { start: H(11) })] };
+  const state = { chain: false, times: true, cols: { subject: true, due: false, type: true }, rows: [row('a', 30, { start: H(9), status: 2, subject: 'Math', due: '2026-10-14', type: 'Quiz' }), row('b', 60, { start: H(11) })] };
   assert.deepEqual(L.hydrate(L.serialize(state)), state);
   const h = L.hydrate({ rows: [row('ok', 5), { id: 1 }, null, { id: 'z', name: 'z', mins: -3 }, { id: 'q', name: 'q', mins: 10, status: 9, start: 99999 }] });
   assert.deepEqual(h.rows.map((r) => r.id), ['ok', 'q']);
@@ -157,7 +158,7 @@ test('hydrate round-trips and defends against bad data', () => {
   assert.equal(h.rows[1].start, null);
   assert.equal(h.chain, true);
   assert.equal(h.times, false);
-  assert.deepEqual(L.hydrate(undefined), { rows: [], times: false, chain: true });
+  assert.deepEqual(L.hydrate(undefined), { rows: [], times: false, chain: true, cols: NO_COLS });
 });
 test('hydrate keeps the starts that cut a chained list', () => {
   const h = L.hydrate({ chain: true, rows: [row('a', 30, { start: H(9) }), row('b', 30, { start: H(10) })] });
@@ -256,4 +257,38 @@ test('countLabel is singular only for one', () => {
   assert.equal(L.countLabel(1), '1 assignment');
   assert.equal(L.countLabel(2), '2 assignments');
   assert.equal(L.countLabel(30), '30 assignments');
+});
+
+test('validDue accepts only real calendar days written YYYY-MM-DD', () => {
+  assert.equal(L.validDue('2026-10-14'), '2026-10-14');
+  assert.equal(L.validDue('2028-02-29'), '2028-02-29');
+  for (const bad of ['2026-02-30', '2027-02-29', '2026-13-01', '2026-00-10', '10/14/2026', '2026-1-4', '', ' 2026-10-14', null, undefined, 20261014, {}]) {
+    assert.equal(L.validDue(bad), null, String(bad));
+  }
+});
+test('cleanRow keeps subject, due date and type, and defends against bad ones', () => {
+  const ok = L.cleanRow({ id: 'a', name: 'a', mins: 10, subject: 'Math', due: '2026-10-14', type: 'Quiz' });
+  assert.deepEqual([ok.subject, ok.due, ok.type], ['Math', '2026-10-14', 'Quiz']);
+  const bad = L.cleanRow({ id: 'b', name: 'b', mins: 10, subject: 7, due: '2026-02-30', type: { x: 1 } });
+  assert.deepEqual([bad.subject, bad.due, bad.type], ['', null, '']);
+  const long = L.cleanRow({ id: 'c', name: 'c', mins: 10, subject: 's'.repeat(300), type: 't'.repeat(300) });
+  assert.deepEqual([long.subject.length, long.type.length], [100, 100]);
+});
+test('none of the three extra fields is needed for a row to be finished', () => {
+  assert.equal(L.isComplete(row('a', 5)), true);
+  assert.equal(L.isComplete(row('a', 5, { subject: 'Math', due: '2026-10-14', type: 'Quiz' })), true);
+  assert.equal(L.isComplete(row('', 5, { subject: 'Math' })), false);
+});
+test('serialize writes the column choices and trims the text; hydrate reads them back', () => {
+  const out = L.serialize({ chain: true, times: false, cols: { subject: true, due: true, type: false }, rows: [row('a', 30, { subject: '  Math ', type: ' Quiz  ', due: '2026-10-14' })] });
+  assert.deepEqual(out.cols, { subject: true, due: true, type: false });
+  assert.deepEqual([out.rows[0].subject, out.rows[0].type, out.rows[0].due], ['Math', 'Quiz', '2026-10-14']);
+  assert.deepEqual(L.hydrate(out).cols, { subject: true, due: true, type: false });
+});
+test('an old document with no column fields loads with every column hidden and empty', () => {
+  const h = L.hydrate({ v: 1, times: true, chain: false, rows: [{ id: 'a', name: 'a', mins: 30, status: 1, start: H(9) }] });
+  assert.deepEqual(h.cols, NO_COLS);
+  assert.deepEqual([h.rows[0].subject, h.rows[0].due, h.rows[0].type], ['', null, '']);
+  assert.deepEqual(L.hydrate({ cols: { subject: 'yes', due: 1, type: true } }).cols, { subject: false, due: false, type: true }, 'only true turns a column on');
+  assert.deepEqual(L.hydrate({ cols: 'x' }).cols, NO_COLS);
 });

@@ -1,25 +1,28 @@
 # Assignment Tracker
 
-A one-page assignment tracker with a shared list, a progress bar, optional start and end times, and drag to reorder. It is a single self-contained HTML file (`index.html`), published as a Claude Artifact or deployed on Netlify (see [Deploy on Netlify](#deploy-on-netlify)). Dark theme, system sans-serif, desktop only.
+A one-page assignment tracker with a shared list, a progress bar, optional start and end times, optional subject, due date and assignment type columns, and drag to reorder. It is a single self-contained HTML file (`index.html`), published as a Claude Artifact or deployed on Netlify (see [Deploy on Netlify](#deploy-on-netlify)). Dark theme, system sans-serif, desktop only.
 
-The page shows no words. Everything is an icon except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, tooltips, the one message in the all-done popup, and the picture that popup shares. Tooltips appear after a long hover (800 ms).
+The page shows no words. Everything is an icon (the menu included) except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, tooltips, the one message in the all-done popup, and the picture that popup shares. Tooltips appear after a long hover (800 ms).
 
 ## What it does
 
 | Feature | Behavior |
 | --- | --- |
-| Row | Status icon, assignment name, duration. |
+| Row | Status icon, assignment name, duration. Subject, due date, assignment type and times can be added from the menu. |
 | Status | Click cycles ○ not started, ◐ in progress, ● done. Gray, yellow, green. A done row is dimmed with a slight green tint, has no strikethrough, and stays in place. |
 | Name | Shows the placeholder when empty. Click to edit inline. Enter commits, Esc cancels. |
 | Duration | Click to edit inline. Hours and minutes fields both show while editing. After commit the empty unit disappears: `30 min`, `1 hr`, `2 hrs`, `2 hrs 30 min`. Stored as total minutes. |
 | Add | `+` under the list adds a row at the bottom. A row needs both a name and a duration. |
 | Delete | `×` appears when you hover a row. |
 | Reorder | Drag any row, including from its name or status icon. |
+| Menu | Hamburger icon in the header. Opens a small drop-down under it with icon toggles (each has a tooltip): subject (book), due date (calendar), assignment type (tag), then times (clock) and chaining (link). The drop-down stays open while you change several toggles, and closes on a second click on the hamburger, an outside click, Esc (focus returns to the hamburger) or tabbing out. |
+| Subject, Assignment type | Optional columns, off by default, shown right after the name (subject first, type after the due date). Free text, up to 100 characters. Click to edit inline; Enter commits, Esc cancels; empty is fine. A row can be dragged by these cells. |
+| Due date | Optional column, off by default, between subject and type. A date input; clearing it removes the date. Stored as `YYYY-MM-DD`. |
 | Reload | Circular-arrow icon at the right end of the header. Reloads the page, which reads the shared list again, so changes made on another device show up. A save still waiting is sent first. |
 | Clear | Trash icon, bottom-right. First click arms it (red), second click clears the list for every viewer. |
 | Progress | Thick bar at the top with the percentage inside: `½ (done rows ÷ rows + done minutes ÷ total minutes)`. In-progress rows count as 0. |
-| Times | Clock toggle at the top, off by default. Off: no start or end time is visible anywhere. On: each row shows a 12-hour start and an end (start + duration). An end past midnight is plain clock time (`1:15 AM`). Entered starts persist through off and on. |
-| Chaining | Link toggle, on by default, shown while times are on. On: only the first row's start is entered, every lower start is the previous end, and with no first start every start and end is blank. Editing the start of a row that follows the row above asks first, with two choices and a cancel: scissors ("Cut and continue") keeps chaining on, gives that row the new start and lets the rows after it continue from it; the broken-link icon ("Disable chaining") turns chaining off. Esc or a click elsewhere cancels. Off: every row uses only its own entered start, and a row with no start has a blank end. Turning chaining on again discards every lower row's own start, including cuts. |
+| Times | Clock toggle in the menu, off by default. Off: no start or end time is visible anywhere. On: each row shows a 12-hour start and an end (start + duration). An end past midnight is plain clock time (`1:15 AM`). Entered starts persist through off and on. |
+| Chaining | Link toggle in the menu, on by default, shown while times are on. On: only the first row's start is entered, every lower start is the previous end, and with no first start every start and end is blank. Editing the start of a row that follows the row above asks first, with two choices and a cancel: scissors ("Cut and continue") keeps chaining on, gives that row the new start and lets the rows after it continue from it; the broken-link icon ("Disable chaining") turns chaining off. Esc or a click elsewhere cancels. Off: every row uses only its own entered start, and a row with no start has a blank end. Turning chaining on again discards every lower row's own start, including cuts. |
 | Start time on in progress | Marking a row in progress while times are shown fills its start with the current time, and the start stays editable. Chained, that start cuts the chain before the row (the row above keeps its own end) and the rows after it continue from its end; chaining stays on. Unchained, it is simply the row's own start. |
 | End time on done | Marking a row done while times are shown fills its end with the current time: the duration becomes start-to-now, so chained rows below, progress and the saved list follow. |
 | End correction | Once a row is done, click its end time to correct it (hour, minute, AM/PM). The new end sets the real duration (end minus start, wrapping past midnight), so chained rows below, progress, and the saved list all follow. Not editable before the row is done, or when the row has no start. |
@@ -40,7 +43,8 @@ The page shows no words. Everything is an icon except placeholders, units (`hr`,
 - Editing a done row's end changes its duration, never its start. An end equal to the start, or an empty one, is ignored.
 - Turning chaining off keeps only starts that were entered. Computed starts are not copied into the rows.
 - The armed trash disarms after 4 seconds, on any other click, or on Esc.
-- The `Times` and `Chaining` toggles are saved with the list, so every viewer sees the same setup.
+- The three column toggles, `Times` and `Chaining` are saved with the list, so every viewer sees the same setup.
+- Subject, due date and type never decide whether a row is finished (that is still a name and a duration), so an unfinished row, with or without them, is not saved or counted.
 - The all-done total is the sum of the rows' durations. With times shown, a row marked done records start-to-now, so the total is the time really spent; with times hidden it is the planned total.
 - The all-done sentence is fixed: `Peter finished all of his assignments in …`, in the popup, on the picture and in the shared text. One person uses this tracker, so nothing asks for a name.
 - The all-done popup opens only when a status click finishes the list. It stays quiet when a finished list loads, when deleting the last open row leaves only done rows, and when an edit changes a done row. Un-marking a row and finishing it again shows it again, with the current total. An unfinished draft row is ignored, as it is in progress.
@@ -60,13 +64,15 @@ One document, `tracker/list`, in the artifact database (as an Artifact) or in th
   "v": 1,
   "times": false,
   "chain": true,
+  "cols": { "subject": true, "due": true, "type": false },
   "rows": [
-    { "id": "lq3k9x2a1b", "name": "Essay draft", "mins": 150, "status": 1, "start": 540 }
+    { "id": "lq3k9x2a1b", "name": "Essay draft", "mins": 150, "status": 1, "start": 540, "subject": "English", "due": "2026-10-14", "type": "" }
   ]
 }
 ```
 
 - `mins` is total minutes. `status` is `0` not started, `1` in progress, `2` done.
+- `cols` says which optional columns show. `subject` and `type` are text (up to 100 characters); `due` is `YYYY-MM-DD` or `null`. Documents saved before these existed have no `cols` and no row fields, and load with every column hidden and empty.
 - `start` is minutes since midnight, or `null`. When `chain` is true a row without a start follows the end of the row above; a row with one cuts the chain there.
 - The list is read once when the page opens. There is no live sync: the latest write wins, and a viewer sees other people's changes after reopening the page.
 - Writes are debounced, sent one at a time, and skipped when nothing changed. If the list could not be read, the page never writes over it. Edits made before the list arrives are merged in.
