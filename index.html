@@ -90,6 +90,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 /* optional columns: subject, due date, assignment type (shown from the menu) */
 .cs, .cd, .ct { display: none; }
 .cs, .ct { flex: 0 1 110px; min-width: 56px; } /* narrow windows squeeze these before the name */
+.ct { flex-basis: 124px; } /* room for the "Assignment type" placeholder */
 .cd { flex: none; width: 128px; }
 #list.c-subject .cs, #list.c-type .ct { display: flex; }
 #list.c-due .cd { display: block; }
@@ -433,9 +434,9 @@ function hydrate(d) {
   const ROW_HTML = `
     <button class="st" type="button"></button>
     <div class="nm"><input class="nmi" type="text" maxlength="200" placeholder="Assignment" autocomplete="off" spellcheck="false" aria-label="Assignment"></div>
-    <div class="cs tf" data-tip="Subject"><input class="tfi sbi" type="text" maxlength="100" placeholder="--" autocomplete="off" spellcheck="false" aria-label="Subject"></div>
+    <div class="cs tf" data-tip="Subject"><input class="tfi sbi" type="text" maxlength="100" placeholder="Subject" autocomplete="off" spellcheck="false" aria-label="Subject"></div>
     <div class="cd" data-tip="Due date"><input class="ddi" type="date" aria-label="Due date"></div>
-    <div class="ct tf" data-tip="Assignment type"><input class="tfi tyi" type="text" maxlength="100" placeholder="--" autocomplete="off" spellcheck="false" aria-label="Assignment type"></div>
+    <div class="ct tf" data-tip="Assignment type"><input class="tfi tyi" type="text" maxlength="100" placeholder="Assignment type" autocomplete="off" spellcheck="false" aria-label="Assignment type"></div>
     <div class="du">
       <button class="dv" type="button" data-tip="Duration"></button>
       <div class="de" data-tip="Duration">
