@@ -157,6 +157,7 @@ test('status, order, toggles and clear are saved and come back', async () => {
   await withSite({}, async (page) => {
     assert.deepEqual(await names(page), ['One', 'Two', 'Three']);
     await page.click('.row .st'); await page.click('.row .st'); // first row: done
+    await page.click('#menu');
     await page.click('#times');
     await settle(page);
     const doc = await stored();
@@ -164,6 +165,7 @@ test('status, order, toggles and clear are saved and come back', async () => {
     assert.equal(doc.times, true);
     await page.reload();
     await page.waitForTimeout(250);
+    await page.click('#menu');
     assert.equal(await page.locator('#chain').isVisible(), true, 'times came back on');
     assert.equal(await page.locator('.row.done').count(), 1);
     await page.click('#clear'); await page.click('#clear');
@@ -184,6 +186,39 @@ test('another browser sees the same list', async () => {
       await one.waitForTimeout(250);
       assert.equal(await one.locator('.row.s1').count(), 1, 'the other browser\'s change shows after a reload');
     });
+  });
+});
+
+test('the reload button shows what another browser changed', async () => {
+  await seed([R('a', 'One', 30)]);
+  await withSite({}, async (one) => {
+    await seed([R('a', 'One', 30, { status: 1 }), R('b', 'Two', 20)]);
+    assert.deepEqual(await names(one), ['One'], 'the page only reads the list when it opens');
+    await Promise.all([one.waitForNavigation(), one.click('#reload')]);
+    await one.waitForTimeout(250);
+    assert.deepEqual(await names(one), ['One', 'Two']);
+    assert.equal(await one.locator('.row.s1').count(), 1);
+  });
+});
+
+test('subject, due date, type and the column choices go through the real function and database and come back', async () => {
+  await seed([R('a', 'One', 30, { subject: 'Math', due: '2026-10-14', type: 'Quiz' }), R('b', 'Two', 20)], { cols: { subject: true, due: true, type: false } });
+  await withSite({}, async (page) => {
+    assert.deepEqual(await page.$$eval('.row .sbi', (els) => els.map((e) => e.value)), ['Math', '']);
+    assert.deepEqual(await page.$$eval('.row .ddi', (els) => els.map((e) => e.value)), ['2026-10-14', '']);
+    assert.equal(await page.locator('.row .ct').first().isVisible(), false);
+    await page.click('.row:nth-child(2) .cs');
+    await page.keyboard.type('Art');
+    await page.keyboard.press('Enter');
+    await page.click('#menu');
+    await page.click('#colType');
+    await settle(page);
+    const doc = await stored();
+    assert.deepEqual(doc.rows.map((r) => [r.subject, r.due, r.type]), [['Math', '2026-10-14', 'Quiz'], ['Art', null, '']]);
+    assert.deepEqual(doc.cols, { subject: true, due: true, type: true });
+    await page.reload();
+    await page.waitForTimeout(250);
+    assert.deepEqual(await page.$$eval('.row .tyi', (els) => els.map((e) => e.value)), ['Quiz', ''], 'and the type column is on after a reload');
   });
 });
 
