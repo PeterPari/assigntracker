@@ -24,13 +24,15 @@ export function wrappedPage() {
 
 /**
  * Injected before the page script. A tiny in-memory stand-in for `claude.use('db')`.
- * Control it from tests through window.__db: { store, writes, failWith, failGet, delay }.
+ * Control it from tests through window.__db: { store, writes, failWith, failGet, failQuery, delay, queries }.
+ * collection(path) answers where/orderBy/limit/get over the store keys under `path/`, like the real runtime; each get() is
+ * counted in `queries`, and `failQuery` is an error code it rejects with.
  * It also stands in for the `downloads` capability: saves are recorded in window.__db.downloads as { filename, data },
  * `noDownloads` makes use('downloads') resolve null, and `downloadFail` is an error code save() rejects with.
  */
 export function mockDbScript(initial) {
   return `(() => {
-    const __db = { store: ${JSON.stringify(initial ?? {})}, writes: [], failWith: null, failGet: null, delay: 0, downloads: [], noDownloads: false, downloadFail: null };
+    const __db = { store: ${JSON.stringify(initial ?? {})}, writes: [], failWith: null, failGet: null, failQuery: null, queries: 0, delay: 0, downloads: [], noDownloads: false, downloadFail: null };
     window.__db = __db;
     const wait = () => new Promise(r => setTimeout(r, __db.delay));
     window.claude = {
@@ -45,7 +47,29 @@ export function mockDbScript(initial) {
         }
         if (name !== 'db') return null;
         if (__db.missing) return null;
+        const OPS = { '==': (a, b) => a === b, '!=': (a, b) => a !== b, '<': (a, b) => a < b, '<=': (a, b) => a <= b, '>': (a, b) => a > b, '>=': (a, b) => a >= b };
+        const query = (path, q) => ({
+          where: (f, op, v) => query(path, { ...q, where: [...q.where, [f, op, v]] }),
+          orderBy: (f, dir = 'asc') => query(path, { ...q, order: [f, dir] }),
+          limit: (n) => query(path, { ...q, limit: n }),
+          get: async () => {
+            await wait();
+            __db.queries++;
+            if (__db.failQuery) throw { code: __db.failQuery };
+            let docs = Object.keys(__db.store).filter((k) => k.startsWith(path + '/') && !k.slice(path.length + 1).includes('/')).sort()
+              .map((k) => ({ id: k.slice(path.length + 1), body: __db.store[k] }));
+            for (const [f, op, v] of q.where) docs = docs.filter((d) => d.body[f] !== undefined && OPS[op](d.body[f], v));
+            if (q.order) {
+              const [f, dir] = q.order, s = dir === 'desc' ? -1 : 1;
+              docs.sort((a, b) => (a.body[f] === undefined) - (b.body[f] === undefined) || (a.body[f] < b.body[f] ? -s : a.body[f] > b.body[f] ? s : 0));
+            }
+            if (q.limit) docs = docs.slice(0, q.limit);
+            const out = docs.map((d) => ({ id: d.id, exists: true, data: () => JSON.parse(JSON.stringify(d.body)) }));
+            return { docs: out, size: out.length, empty: !out.length };
+          },
+        });
         return {
+          collection: (path) => ({ path, ...query(path, { where: [], order: null, limit: 0 }) }),
           doc: (path) => ({
             path,
             get: async () => {

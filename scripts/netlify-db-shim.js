@@ -1,6 +1,7 @@
 /* Stand-in for the Claude Artifact runtime on a normal website. The page only ever calls
- *   claude.use('db').doc(path).get() / .set(data)       -> shared list, kept in Netlify Database
- *   claude.use('downloads').save({ filename, data })    -> save a picture as a file
+ *   claude.use('db').doc(path).get() / .set(data)       -> shared list and each save, kept in Netlify Database
+ *   claude.use('db').collection(path)                   -> every save, read back with where / orderBy / limit / get
+ *   claude.use('downloads').save({ filename, data })    -> save a picture or the saves CSV as a file
  * so this provides exactly that, over /api/db/* (netlify/functions/db.mjs). Inside a Claude Artifact the real
  * runtime is already there and this does nothing. Errors carry the same `code`s the page already handles. */
 (() => {
@@ -25,7 +26,35 @@
     return res;
   }
 
+  // A collection query. The function returns the whole collection, and the filters, order and limit apply here.
+  const OPS = { '==': (a, b) => a === b, '!=': (a, b) => a !== b, '<': (a, b) => a < b, '<=': (a, b) => a <= b, '>': (a, b) => a > b, '>=': (a, b) => a >= b };
+  const query = (path, q) => ({
+    where: (field, op, value) => {
+      if (!OPS[op]) throw new TypeError('unsupported operator ' + op);
+      return query(path, { ...q, where: [...q.where, [field, op, value]] });
+    },
+    orderBy: (field, dir = 'asc') => query(path, { ...q, order: [field, dir === 'desc' ? -1 : 1] }),
+    limit: (n) => query(path, { ...q, limit: n }),
+    async get() {
+      const res = await call('GET', path);
+      if (!res.ok) throw fail('failed', res.status);
+      let body;
+      try { body = await res.json(); } catch (_) { throw fail('failed', res.status); }
+      if (!body || !Array.isArray(body.docs)) throw fail('failed', res.status);
+      let docs = body.docs.filter((d) => d && typeof d.id === 'string' && d.data && typeof d.data === 'object');
+      for (const [f, op, v] of q.where) docs = docs.filter((d) => d.data[f] !== undefined && OPS[op](d.data[f], v));
+      if (q.order) {
+        const [f, s] = q.order;
+        docs.sort((a, b) => (a.data[f] === undefined) - (b.data[f] === undefined) || (a.data[f] < b.data[f] ? -s : a.data[f] > b.data[f] ? s : 0));
+      }
+      if (q.limit) docs = docs.slice(0, q.limit);
+      const out = docs.map((d) => ({ id: d.id, exists: true, data: () => JSON.parse(JSON.stringify(d.data)) }));
+      return { docs: out, size: out.length, empty: !out.length };
+    },
+  });
+
   const db = {
+    collection: (path) => ({ path, ...query(path, { where: [], order: null, limit: 0 }) }),
     doc: (path) => ({
       path,
       async get() {

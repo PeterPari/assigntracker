@@ -1,9 +1,14 @@
 // HTTP handler behind /api/db/*: the Netlify stand-in for the Claude Artifact `db` capability.
-// It reads and writes whole JSON documents in the `docs` table (see netlify/database/migrations).
+// It reads and writes whole JSON documents in the `docs` table (see netlify/database/migrations):
+//   tracker/list   the list                      GET, PUT
+//   saves/<id>     one save (the save button)    GET, PUT
+//   saves          every save, ordered by id     GET
 // Plain Request in, Response out, so the function entry and the tests share it.
 
 const PREFIX = '/api/db/';
-const PATHS = new Set(['tracker/list']); // a public endpoint: only the page's own document, never arbitrary keys
+// A public endpoint: only the page's own documents, never arbitrary keys.
+const DOC = /^(?:tracker\/list|saves\/[A-Za-z0-9_-]{1,64})$/;
+const COLLECTIONS = new Set(['saves']);
 export const MAX_BYTES = 256 * 1024;
 
 const reply = (status, body, headers) => new Response(body === undefined ? null : JSON.stringify(body), {
@@ -16,7 +21,18 @@ export function createHandler(getDb) {
   return async (req) => {
     const { pathname } = new URL(req.url);
     const path = pathname.startsWith(PREFIX) ? pathname.slice(PREFIX.length) : '';
-    if (!PATHS.has(path)) return reply(404, { error: 'not found' });
+    if (COLLECTIONS.has(path)) {
+      if (req.method !== 'GET') return reply(405, { error: 'method not allowed' }, { allow: 'GET' });
+      try {
+        const prefix = path + '/'; // a fixed name, so no LIKE wildcards in it
+        const rows = await getDb().sql`SELECT path, data FROM docs WHERE path LIKE ${prefix + '%'} ORDER BY path`;
+        return reply(200, { docs: rows.map((r) => ({ id: r.path.slice(prefix.length), data: r.data })) });
+      } catch (err) {
+        console.error('docs-api:', err);
+        return reply(500, { error: 'unavailable' });
+      }
+    }
+    if (!DOC.test(path)) return reply(404, { error: 'not found' });
     if (req.method !== 'GET' && req.method !== 'PUT') return reply(405, { error: 'method not allowed' }, { allow: 'GET, PUT' });
 
     try {

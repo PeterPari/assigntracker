@@ -299,3 +299,45 @@ test('with no share sheet or clipboard, share saves the picture as a PNG downloa
     assert.deepEqual(errors, []);
   });
 });
+
+test('save: each click adds a save to the database; repeats are asked about; Shift-click downloads every save as one CSV', async () => {
+  await seed([R('a', 'Read ch. 4', 45, { subject: 'Biology' }), R('b', 'Essay', 90)]);
+  const HEAD = 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End,ID\n';
+  const kept = async () => (await db.sql`SELECT path, data FROM docs WHERE path LIKE 'saves/%' ORDER BY path`);
+  const tip = (page) => page.evaluate(() => { const t = document.querySelector('#tip'); return t.classList.contains('show') ? t.textContent : null; });
+  let downloads = 0;
+  await withSite({}, async (page, errors) => {
+    page.on('download', () => { downloads++; });
+    await page.click('#save');
+    await page.waitForTimeout(400);
+    assert.equal(await tip(page), 'Saved');
+    let rows = await kept();
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].path, /^saves\/\d{15}-[a-z0-9]+$/);
+    assert.equal(rows[0].path, 'saves/' + rows[0].data.k);
+    assert.deepEqual(rows[0].data.rows.map((r) => [r.id, r.name, r.subject, r.mins]), [['a', 'Read ch. 4', 'Biology', 45], ['b', 'Essay', '', 90]]);
+    assert.equal(downloads, 0, 'a plain click downloads nothing');
+
+    await page.waitForTimeout(2400);
+    await addRow(page, 'Lab notes', 0, 20);
+    await page.click('#save');
+    await page.waitForSelector('#again', { state: 'visible' });
+    assert.deepEqual(await page.$$eval('.row.again .nmi', (els) => els.map((e) => e.value)), ['Read ch. 4', 'Essay']);
+    await page.click('#againNo');
+    await page.waitForTimeout(400);
+    rows = await kept();
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows[1].data.rows.map((r) => r.name), ['Lab notes'], 'only the new assignment');
+
+    await page.waitForTimeout(2400);
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('#save', { modifiers: ['Shift'] })]);
+    assert.match(download.suggestedFilename(), /^assignment-saves-\d{4}-\d\d-\d\d\.csv$/);
+    const file = readFileSync(await download.path());
+    assert.deepEqual([...file.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'a UTF-8 byte order mark first');
+    const D = '\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d';
+    assert.match(file.subarray(3).toString('utf8'), new RegExp('^' + HEAD
+      + D + ',Not started,Read ch. 4,Biology,,,45,,,a\n' + D + ',Not started,Essay,,,,90,,,b\n' + D + ',Not started,Lab notes,,,,20,,,[a-z0-9]+\n$'));
+    assert.equal((await kept()).length, 2, 'Shift-click saves nothing');
+    assert.deepEqual(errors, [], 'nothing blocked by the site CSP');
+  });
+});
