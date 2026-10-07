@@ -571,12 +571,33 @@ test('reload: an icon-only button ends the header and reloads the page, sending 
       window.addEventListener('pagehide', () => sessionStorage.setItem('writes', JSON.stringify(window.__db.writes)));
     });
     await page.click('.row .st'); // a save is now waiting on its 400 ms delay
-    await Promise.all([page.waitForNavigation(), page.click('#reload')]);
+    const navigated = page.waitForNavigation();
+    await page.click('#reload');
+    const spin = await page.evaluate(() => {
+      const a = document.querySelector('#reload svg').getAnimations();
+      return { count: a.length, to: a[0] && a[0].effect.getKeyframes().at(-1).transform, ms: a[0] && a[0].effect.getTiming().duration };
+    });
+    assert.deepEqual(spin, { count: 1, to: 'rotate(360deg)', ms: 450 }, 'the icon turns one full circle while the page reloads');
+    await page.click('#reload', { force: true }); // a second click mid-spin must not restart or stack the turn
+    assert.equal(await page.evaluate(() => document.querySelector('#reload svg').getAnimations().length), 1);
+    await navigated;
     await page.waitForTimeout(80);
     assert.equal(await page.evaluate(() => window.__alive), undefined, 'a new page, not the old one');
     const writes = JSON.parse(await page.evaluate(() => sessionStorage.getItem('writes')));
     assert.deepEqual(writes.map((w) => w.rows.map((r) => r.status)), [[1]], 'the waiting change was sent before the reload');
     assert.deepEqual(await names(page), ['One'], 'the list is read again');
+  });
+});
+
+test('reload: no spin when the system asks for reduced motion, and the page still reloads', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.evaluate(() => { window.__alive = true; });
+    const navigated = page.waitForNavigation();
+    await page.click('#reload');
+    assert.equal(await page.evaluate(() => document.querySelector('#reload svg').getAnimations().length), 0);
+    await navigated;
+    assert.equal(await page.evaluate(() => window.__alive), undefined, 'a new page, not the old one');
   });
 });
 

@@ -1263,9 +1263,16 @@ function hydrate(d) {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && saveTimer) flush(); });
   window.addEventListener('pagehide', () => { if (saveTimer) flush(); });
 
-  /** Reload fetches the shared list again (it is only read when the page opens). A save still waiting is sent first. */
+  /** Reload fetches the shared list again (it is only read when the page opens). A save still waiting is sent first.
+   *  The icon turns once meanwhile (transform only, so it runs off the main thread); the reload waits for the turn so it is seen. */
+  const SPIN = { duration: 450, easing: 'cubic-bezier(.4, 0, .2, 1)' };
   $('#reload').addEventListener('click', async () => {
+    const arrow = $('#reload svg');
+    if (arrow.getAnimations().length) return;
+    const spun = matchMedia('(prefers-reduced-motion: reduce)').matches ? null
+      : arrow.animate({ transform: ['rotate(0deg)', 'rotate(360deg)'] }, SPIN).finished;
     if (saveTimer) await flush();
+    await spun;
     location.reload();
   });
 
