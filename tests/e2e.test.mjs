@@ -742,6 +742,36 @@ test('dark theme: page background and text are explicit and readable', async () 
   });
 });
 
+test('subject banner: each class gets its schedule color on the left edge, anything else grey', async () => {
+  const subjects = ['Math', 'History', 'English', 'Physics', 'French', 'AICS', 'Philosophy', 'Research', 'Maths', 'Gym', ''];
+  const want = [
+    'rgb(145, 193, 243)', 'rgb(251, 222, 113)', 'rgb(238, 137, 156)', 'rgb(107, 246, 175)',
+    'rgb(249, 169, 92)', 'rgb(101, 242, 238)', 'rgb(230, 179, 28)', 'rgb(196, 164, 132)',
+    'rgb(145, 193, 243)', 'rgb(74, 81, 96)', 'rgb(74, 81, 96)',
+  ];
+  const rows = subjects.map((s, i) => R('r' + i, 'Task ' + i, 30, { subject: s, due: null, type: '' }));
+  await withPage({ initial: doc(rows) }, async (page) => {
+    const banner = () => page.$$eval('.row', (els) => els.map((e) => {
+      const b = getComputedStyle(e, '::before'), r = e.getBoundingClientRect();
+      return { color: b.backgroundColor, width: b.width, side: b.left, x: e.querySelector('.st').getBoundingClientRect().left - r.left };
+    }));
+    const got = await banner();
+    assert.deepEqual(got.map((g) => g.color), want);
+    assert.ok(got.every((g) => g.width === '5px' && g.side === '0px'), 'a 5px strip on the left edge');
+    assert.ok(got.every((g) => g.x >= 8), 'the status icon clears the banner');
+    assert.notEqual(got[1].color, got[6].color, 'History and Philosophy are different yellows');
+    // shown with the Subject column hidden, and follows an inline edit
+    await toggle(page, '#colSubject');
+    await page.click('.row:nth-child(10) .cs');
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('pre-calculus');
+    await page.keyboard.press('Enter');
+    assert.equal((await banner())[9].color, 'rgb(145, 193, 243)');
+    await settle(page);
+    assert.equal((await saved(page)).rows[9].subject, 'pre-calculus');
+  });
+});
+
 test('keyboard: tab reaches status, name, duration and delete; Enter on duration button edits', async () => {
   await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
     await page.focus('.row .st');

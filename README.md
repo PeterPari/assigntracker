@@ -8,7 +8,7 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 
 | Feature | Behavior |
 | --- | --- |
-| Row | Status icon, assignment name, duration. Subject, due date, assignment type and times can be added from the menu. |
+| Row | Status icon, assignment name, duration, with a colored banner on the left edge for its subject. Subject, due date, assignment type and times can be added from the menu. |
 | Status | Click cycles ○ not started, ◐ in progress, ● done. Gray, yellow, green. A done row is dimmed with a slight green tint, has no strikethrough, and stays in place. |
 | Name | Shows the placeholder when empty. Click to edit inline. Enter commits, Esc cancels. |
 | Duration | Click to edit inline. Hours and minutes fields both show while editing. After commit the empty unit disappears: `30 min`, `1 hr`, `2 hrs`, `2 hrs 30 min`. Stored as total minutes. |
@@ -17,6 +17,7 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 | Reorder | Drag any row, including from its name or status icon. |
 | Menu | Hamburger icon in the header. Opens a small drop-down under it with icon toggles (each has a tooltip): subject (book), due date (calendar), assignment type (tag), then times (clock) and chaining (link). The drop-down stays open while you change several toggles, and closes on a second click on the hamburger, an outside click, Esc (focus returns to the hamburger) or tabbing out. |
 | Subject, Assignment type | Optional columns, off by default, shown right after the name (subject first, type after the due date). Free text, up to 100 characters. While empty they show the grey placeholders `Subject` and `Assignment type`, as the name shows `Assignment`. Click to edit inline; Enter commits, Esc cancels; empty is fine. A row can be dragged by these cells. |
+| Subject banner | A solid 5px strip on the left edge of every row, colored by subject, whether or not the Subject column is showing. It updates when a subject edit commits. The color is worked out from the text (not stored): case and spacing do not matter, and common aliases count. Anything that matches none of the classes, and an empty subject, gets a neutral grey. |
 | Due date | Optional column, off by default, between subject and type. A date input; clearing it removes the date. Stored as `YYYY-MM-DD`. |
 | Reload | Circular-arrow icon at the right end of the header. Reloads the page, which reads the shared list again, so changes made on another device show up. A save still waiting is sent first. The icon spins once as it goes (skipped when the system asks for reduced motion). |
 | Clear | Trash icon, bottom-right. First click arms it (red), second click clears the list for every viewer. |
@@ -54,6 +55,24 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 - Closing the share sheet or declining the save confirmation is not an error and shows nothing. A busy confirmation says `Try again in a moment`; a dead end says `Could not share`, and the button works again afterwards.
 - Keyboard focus starts on the × (not the share button), so the Enter that finished the last row cannot share anything. Tab cycles between the two buttons.
 - A small warning icon appears in the header only when the list could not be saved or loaded (no database, view-only access, or a failed write).
+
+### Subject colors
+
+The colors come from the school schedule PDF (the fill of each class block). History and Philosophy share one yellow in the schedule, so Philosophy is a deeper yellow here to tell them apart. The first rule that matches the subject text wins, in this order.
+
+| Class | Color | Also matches |
+| --- | --- | --- |
+| Philosophy | `#E6B31C` | `phil`, `Western Philosophy` |
+| History | `#FBDE71` | `hist`, `US History`, `Advanced US History B` |
+| Research | `#C4A484` | `Research Practicum B`, `practicum` |
+| AICS | `#65F2EE` | `AI`, `CS`, `Comp Sci`, `Computer Science`, `Adv. AI & Comp Sci` |
+| Physics | `#6BF6AF` | `Classical Physics A` |
+| French | `#F9A95C` | `French IV` |
+| English | `#EE899C` | `English 11`, `Lit`, `Literature` |
+| Math | `#91C1F3` | `Maths`, `Pre-Calculus`, `Calculus`, `Algebra`, `Geometry`, `Trig`, `Statistics` |
+| No match, or empty | `#4A5160` (grey) | |
+
+The matching is `subjectKey` in the `<logic>` block of `index.html`, and the colors are the `--subj-*` variables at the top of its CSS.
 
 ## Data
 

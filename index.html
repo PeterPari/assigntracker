@@ -22,6 +22,15 @@
   --danger-bg: #c93c35;
   --bar-track: #22262e;
   --bar-fill: #26774a;
+  --subj-none: #4a5160;
+  --subj-math: #91c1f3;
+  --subj-history: #fbde71;
+  --subj-english: #ee899c;
+  --subj-physics: #6bf6af;
+  --subj-french: #f9a95c;
+  --subj-aics: #65f2ee;
+  --subj-philosophy: #e6b31c;
+  --subj-research: #c4a484;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 * { box-sizing: border-box; }
@@ -63,11 +72,21 @@ svg { display: block; flex: none; }
 /* rows */
 #list { display: flex; flex-direction: column; gap: 2px; }
 .row {
-  position: relative; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px;
+  position: relative; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 11px;
   border-radius: 6px; box-shadow: inset 0 -1px 0 var(--line);
   transition: transform .16s ease, background-color .12s ease;
   user-select: none; -webkit-user-select: none;
 }
+/* subject banner: a solid strip on the left edge, colored by class (data-subj); grey when the subject matches none */
+.row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 6px 0 0 6px; background: var(--subj, var(--subj-none)); pointer-events: none; }
+.row[data-subj="math"] { --subj: var(--subj-math); }
+.row[data-subj="history"] { --subj: var(--subj-history); }
+.row[data-subj="english"] { --subj: var(--subj-english); }
+.row[data-subj="physics"] { --subj: var(--subj-physics); }
+.row[data-subj="french"] { --subj: var(--subj-french); }
+.row[data-subj="aics"] { --subj: var(--subj-aics); }
+.row[data-subj="philosophy"] { --subj: var(--subj-philosophy); }
+.row[data-subj="research"] { --subj: var(--subj-research); }
 .row:hover { background: var(--row-hover); }
 .row.done { background: var(--done-bg); }
 .row.done:hover { background: rgba(76, 195, 138, .11); }
@@ -329,6 +348,27 @@ function removeRow(rows, id, chain) {
 const COLS = ['subject', 'due', 'type'];
 const colsOf = (c) => ({ subject: !!c && c.subject === true, due: !!c && c.due === true, type: !!c && c.type === true });
 
+/**
+ * Which class a free-text subject belongs to, for the colored banner on a row; '' when it matches none.
+ * Aliases and course names count ("Pre-Calculus" is math, "Adv. AI & Comp Sci" is aics). The first rule that
+ * matches wins, so the more specific words come first.
+ */
+const SUBJECT_RULES = [
+  ['philosophy', /\bphil(osophy)?\b/],
+  ['history', /\bhist(ory)?\b/],
+  ['research', /\b(research|practicum)/],
+  ['aics', /\b(aics|ai|cs)\b|\bcomp(uter)?\.?\s*sci/],
+  ['physics', /\bphysics/],
+  ['french', /\bfrench/],
+  ['english', /\b(english|lit(erature)?\b)/],
+  ['math', /\b(math|calc|pre-?calc|algebra|geometry|trig|stats|statistics)/],
+];
+function subjectKey(subject) {
+  const s = String(subject == null ? '' : subject).toLowerCase();
+  for (const [key, re] of SUBJECT_RULES) if (re.test(s)) return key;
+  return '';
+}
+
 /** A due date is 'YYYY-MM-DD' and a real day on the calendar; anything else is null. */
 function validDue(s) {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
@@ -481,6 +521,7 @@ function hydrate(d) {
     el.classList.toggle('done', r.status === 2);
     el.classList.toggle('has-dur', r.mins > 0);
     el.classList.toggle('derived', s.derived);
+    el.dataset.subj = subjectKey(r.subject);
     const st = $('.st', el);
     if (el._st !== r.status) { st.innerHTML = STATUS[r.status]; el._st = r.status; }
     st.dataset.tip = STATUS_TIP[r.status];
