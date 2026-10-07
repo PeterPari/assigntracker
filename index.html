@@ -161,6 +161,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
     <span class="ib warn" id="warn" hidden data-tip="Not saved" role="img" aria-label="Not saved"></span>
     <button class="ib" id="times" type="button"></button>
     <button class="ib" id="chain" type="button" hidden></button>
+    <button class="ib" id="reload" type="button" data-tip="Reload" aria-label="Reload"></button>
   </div>
   <div id="list"></div>
   <button class="add" id="add" type="button" data-tip="Add" aria-label="Add"></button>
@@ -346,6 +347,7 @@ function hydrate(d) {
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
     share: '<path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
+    reload: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
   };
   const icon = (n, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
   const STATUS = [
@@ -368,6 +370,7 @@ function hydrate(d) {
   const tTimes = $('#times'), tChain = $('#chain'), tWarn = $('#warn'), addBtn = $('#add'), clr = $('#clear');
   addBtn.innerHTML = icon('plus', 18);
   tWarn.innerHTML = icon('alert', 17);
+  $('#reload').innerHTML = icon('reload', 17);
   clr.innerHTML = icon('trash', 17);
   $('#doneIcon').innerHTML = icon('check', 28);
   $('#doneClose').innerHTML = icon('x', 16);
@@ -1099,6 +1102,12 @@ function hydrate(d) {
 
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && saveTimer) flush(); });
   window.addEventListener('pagehide', () => { if (saveTimer) flush(); });
+
+  /** Reload fetches the shared list again (it is only read when the page opens). A save still waiting is sent first. */
+  $('#reload').addEventListener('click', async () => {
+    if (saveTimer) await flush();
+    location.reload();
+  });
 
   async function load() {
     let db = null;

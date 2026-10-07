@@ -555,6 +555,28 @@ test('no live sync: later changes in the store do not appear until reopened', as
   });
 });
 
+test('reload: an icon-only button ends the header and reloads the page, sending a waiting save first', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
+    assert.equal((await page.textContent('#reload')).trim(), '', 'an icon, no words');
+    assert.equal(await page.locator('#reload svg').count(), 1);
+    assert.equal(await page.getAttribute('#reload', 'aria-label'), 'Reload');
+    assert.equal(await page.getAttribute('#reload', 'data-tip'), 'Reload');
+    assert.equal(await page.$eval('.hd', (h) => h.lastElementChild.id), 'reload', 'last in the header, so it stays put when the chain toggle comes and goes');
+    await page.evaluate(() => {
+      window.__alive = true;
+      // the mock database starts over with the page, so note what had been written when the old page went away
+      window.addEventListener('pagehide', () => sessionStorage.setItem('writes', JSON.stringify(window.__db.writes)));
+    });
+    await page.click('.row .st'); // a save is now waiting on its 400 ms delay
+    await Promise.all([page.waitForNavigation(), page.click('#reload')]);
+    await page.waitForTimeout(80);
+    assert.equal(await page.evaluate(() => window.__alive), undefined, 'a new page, not the old one');
+    const writes = JSON.parse(await page.evaluate(() => sessionStorage.getItem('writes')));
+    assert.deepEqual(writes.map((w) => w.rows.map((r) => r.status)), [[1]], 'the waiting change was sent before the reload');
+    assert.deepEqual(await names(page), ['One'], 'the list is read again');
+  });
+});
+
 test('save problems show an icon; a list that could not be read is never overwritten', async () => {
   await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
     await page.evaluate(() => { window.__db.failWith = 'invalid_argument'; });

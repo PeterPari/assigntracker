@@ -187,6 +187,18 @@ test('another browser sees the same list', async () => {
   });
 });
 
+test('the reload button shows what another browser changed', async () => {
+  await seed([R('a', 'One', 30)]);
+  await withSite({}, async (one) => {
+    await seed([R('a', 'One', 30, { status: 1 }), R('b', 'Two', 20)]);
+    assert.deepEqual(await names(one), ['One'], 'the page only reads the list when it opens');
+    await Promise.all([one.waitForNavigation(), one.click('#reload')]);
+    await one.waitForTimeout(250);
+    assert.deepEqual(await names(one), ['One', 'Two']);
+    assert.equal(await one.locator('.row.s1').count(), 1);
+  });
+});
+
 test('a load that fails once is retried and the list appears', async () => {
   await seed([R('a', 'Kept', 20)]);
   let gets = 0;

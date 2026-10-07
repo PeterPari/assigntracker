@@ -15,6 +15,7 @@ The page shows no words. Everything is an icon except placeholders, units (`hr`,
 | Add | `+` under the list adds a row at the bottom. A row needs both a name and a duration. |
 | Delete | `×` appears when you hover a row. |
 | Reorder | Drag any row, including from its name or status icon. |
+| Reload | Circular-arrow icon at the right end of the header. Reloads the page, which reads the shared list again, so changes made on another device show up. A save still waiting is sent first. |
 | Clear | Trash icon, bottom-right. First click arms it (red), second click clears the list for every viewer. |
 | Progress | Thick bar at the top with the percentage inside: `½ (done rows ÷ rows + done minutes ÷ total minutes)`. In-progress rows count as 0. |
 | Times | Clock toggle at the top, off by default. Off: no start or end time is visible anywhere. On: each row shows a 12-hour start and an end (start + duration). An end past midnight is plain clock time (`1:15 AM`). Entered starts persist through off and on. |
