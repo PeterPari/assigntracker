@@ -166,7 +166,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .pc:hover, .pd:hover, .px:hover { background: rgba(255, 255, 255, .08); }
 .pop button:disabled { opacity: .35; cursor: default; background: none; }
 
-/* add + clear */
+/* add, save, clear */
 .add { display: flex; align-items: center; justify-content: center; width: 100%; height: 30px; margin-top: 6px; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--muted); }
 .add:hover { color: var(--text); background: var(--row-hover); }
 .clr, .sav { position: fixed; bottom: 12px; z-index: 5; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--raised); box-shadow: 0 0 0 1px var(--line-2); }
@@ -176,7 +176,18 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .clr.armed { color: #fff; background: var(--danger-bg); box-shadow: none; }
 .sav.ok { color: var(--st-done); }
 .sav.bad { color: var(--st-prog); }
-.clr:disabled, .sav:disabled { opacity: .35; cursor: default; }
+.clr:disabled, .sav.off { opacity: .35; cursor: default; }
+.sav.off:hover { color: var(--muted); }
+
+/* "save these again?" popup, just above the save button; the rows it asks about are highlighted */
+.ag { position: fixed; right: 12px; bottom: 54px; z-index: 6; display: flex; align-items: center; gap: 2px; padding: 3px 3px 3px 10px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); white-space: nowrap; }
+.ag::after { content: ""; position: absolute; top: 100%; right: 54px; width: 8px; height: 8px; margin-top: -5px; transform: rotate(45deg); background: var(--raised); border-right: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
+.agq { margin-right: 6px; }
+.ag button { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 5px; }
+.agy { color: var(--st-done); }
+.agn { color: var(--muted); }
+.ag button:hover { background: rgba(255, 255, 255, .08); }
+.row.again, .row.again:hover { background: rgba(242, 201, 76, .09); box-shadow: inset 0 0 0 1px rgba(242, 201, 76, .6); }
 
 /* all-done popup */
 .ov { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgba(8, 9, 12, .62); animation: ovin .16s ease; }
@@ -219,6 +230,11 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 </div>
 <button class="sav" id="save" type="button" aria-label="Save"></button>
 <span class="sr" id="saveStatus" role="status" aria-live="polite"></span>
+<div class="ag" id="again" role="dialog" aria-labelledby="againQ" hidden>
+  <span class="agq" id="againQ">Would you like to save these again?</span>
+  <button class="agy" id="againYes" type="button" data-tip="Save them again" aria-label="Save them again"></button>
+  <button class="agn" id="againNo" type="button" data-tip="Skip them" aria-label="Skip them"></button>
+</div>
 <button class="clr" id="clear" type="button" aria-label="Clear"></button>
 <div class="ov" id="done" role="dialog" aria-modal="true" aria-labelledby="doneMsg" hidden>
   <div class="dlg">
@@ -430,17 +446,51 @@ function csvCell(v) {
 /** A date as local "2026-10-05 14:03:09": the stamp on every line of a save. */
 const stamp = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 
-/** The first line of the save file. */
-const SAVE_HEADER = 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End\n';
+/** The first line of the downloaded file. ID ties together the lines of one assignment saved on several nights. */
+const SAVE_HEADER = 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End,ID\n';
 
-/** One save as CSV lines, to go under the ones already in the file: a line per finished assignment, all of its columns
- *  whatever the menu shows, each stamped with `at`. Empty when there is nothing finished to save. */
-function saveLines(s, at) {
+/** A save's key and document id: epoch milliseconds, zero padded so keys sort by time, then a random tail so two saves never collide. */
+const saveKey = (t, tail) => String(Math.max(0, Math.floor(t))).padStart(15, '0') + '-' + tail;
+
+/** One save as it is kept in the database: every finished row with all of its fields whatever the menu shows, plus the start and
+ *  end the page works out (minutes since midnight, chained times included, null when a row has none), stamped with `at`.
+ *  Null when nothing is finished. */
+function saveRecord(s, at, k) {
   const { rows, chain } = serialize(s), sch = schedule(rows, chain);
-  return rows.map((r, i) => [
-    at, STATUS_TIP[r.status], r.name, r.subject, r.due || '', r.type, r.mins,
-    sch[i].start == null ? '' : fmtClock(sch[i].start), sch[i].end == null ? '' : fmtClock(sch[i].end),
-  ].map(csvCell).join(',') + '\n').join('');
+  if (!rows.length) return null;
+  return {
+    v: 1, k, at,
+    rows: rows.map((r, i) => ({ id: r.id, name: r.name, subject: r.subject, type: r.type, due: r.due, status: r.status, mins: r.mins, start: sch[i].start, end: sch[i].end })),
+  };
+}
+
+/** The rows of a save read back from the database. Shared data is untrusted: a save needs a key, a row needs an id. */
+const saveRows = (d) => (d && typeof d === 'object' && typeof d.k === 'string' && Array.isArray(d.rows)
+  ? d.rows.filter((r) => r && typeof r === 'object' && typeof r.id === 'string' && r.id !== '') : []);
+
+/** Every assignment id in earlier saves: a row on the list with one of these is a repeat. */
+function savedIds(saves) {
+  const ids = new Set();
+  for (const d of saves) for (const r of saveRows(d)) ids.add(r.id);
+  return ids;
+}
+
+/** Every save as one CSV file: the header, then a line per saved row, oldest save first and rows in list order.
+ *  Empty when nothing has been saved. */
+function savesCsv(saves) {
+  const txt = (v) => (typeof v === 'string' ? v : '');
+  const clock = (v) => (Number.isInteger(v) && v >= 0 && v < DAY ? fmtClock(v) : '');
+  const sorted = saves.filter((d) => saveRows(d).length).sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+  let lines = '';
+  for (const d of sorted) {
+    for (const r of saveRows(d)) {
+      lines += [
+        txt(d.at), STATUS_TIP[r.status === 1 || r.status === 2 ? r.status : 0], txt(r.name), txt(r.subject), txt(r.due), txt(r.type),
+        Number.isFinite(r.mins) ? r.mins : '', clock(r.start), clock(r.end), r.id,
+      ].map(csvCell).join(',') + '\n';
+    }
+  }
+  return lines && SAVE_HEADER + lines;
 }
 /* </logic> */
 
@@ -468,6 +518,7 @@ function saveLines(s, at) {
     book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>',
     calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
     tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r=".6" fill="currentColor"/>',
+    tick: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     reload: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
   };
   const icon = (n, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
@@ -614,7 +665,9 @@ function saveLines(s, at) {
     tChain.dataset.tip = state.chain ? 'Chaining on' : 'Chaining off';
     tChain.setAttribute('aria-label', tChain.dataset.tip);
     clr.disabled = !state.rows.length;
-    sav.disabled = !state.rows.some(isComplete);
+    const nothing = !state.rows.some(isComplete); // greyed, but not disabled: Shift-click still downloads
+    sav.classList.toggle('off', nothing);
+    sav.setAttribute('aria-disabled', String(nothing));
   }
 
   function commit() { touched = true; render(); queueSave(); }
@@ -1116,9 +1169,16 @@ function saveLines(s, at) {
   });
 
   /* ---------- save ---------- */
-  const SAVES_DOC = 'tracker/saves', SAVES_FILE = 'assignment-saves.csv';
-  const SAVE_MSG = { saved: 'Saved', logged: 'Saved, file not downloaded', fail: 'Could not save' };
+  // Save adds the finished rows to the save history in the shared database: one document per save, under saves/.
+  // Shift-click downloads every save as one CSV file instead. The button does not advertise it.
+  const SAVES = 'saves', PAGE = 500;
+  const SAVE_MSG = { saved: 'Saved', none: 'Nothing new to save', fail: 'Could not save', downloaded: 'Downloaded', empty: 'Nothing saved yet', dlfail: 'Could not download' };
+  const SAVE_LOOK = { saved: 'ok', downloaded: 'ok', fail: 'bad', dlfail: 'bad' }; // the rest only say something
+  const againPop = $('#again'), againYes = $('#againYes'), againNo = $('#againNo');
+  againYes.innerHTML = icon('tick', 16);
+  againNo.innerHTML = icon('x', 16);
   let saveBusy = false, saveFlash = 0;
+  let again = null; // a save waiting on the popup: { db, all, fresh }, fresh being the save without the repeats (null when none are new)
   function setSave(tip, iconName, cls) {
     sav.dataset.tip = tip;
     sav.setAttribute('aria-label', tip);
@@ -1137,49 +1197,120 @@ function saveLines(s, at) {
   function flashSave(kind) {
     const msg = SAVE_MSG[kind];
     if (!msg) return;
-    setSave(msg, kind === 'saved' ? 'check' : 'alert', kind === 'saved' ? 'ok' : 'bad');
+    const look = SAVE_LOOK[kind] || '';
+    setSave(msg, look === 'ok' ? 'check' : look === 'bad' ? 'alert' : 'save', look);
     saveLive.textContent = msg;
     tipTarget = sav;
     showTip(sav);
+    tipPinned = true; // stays up even when the popup vanishes from under a still pointer
     clearTimeout(saveFlash);
     saveFlash = setTimeout(resetSave, 2200);
   }
 
-  /** Adds the list under the saves already kept in the shared database, then offers the whole file as a download.
-   *  Resolves to saved | logged (kept, but no file went out) | fail, or null when there is nothing finished to save. */
+  const useDb = async () => { try { return window.claude && window.claude.use ? await window.claude.use('db') : null; } catch (_) { return null; } };
+  /** A database call, tried once more after a short pause when the database is briefly unavailable. */
+  async function retry(fn) {
+    try { return await fn(); } catch (err) { if (!err || err.code !== 'unavailable') throw err; await sleep(600); return fn(); }
+  }
+  /** Every save in the database, a page at a time (a query returns at most 1000 documents). Throws when they cannot be read. */
+  async function readSaves(db) {
+    const out = [];
+    for (let last = null; ;) {
+      let q = db.collection(SAVES).orderBy('k').limit(PAGE);
+      if (last != null) q = q.where('k', '>', last);
+      const snap = await retry(() => q.get());
+      const page = snap.docs.map((d) => d.data());
+      out.push(...page);
+      const k = page.length === PAGE && page[PAGE - 1] ? page[PAGE - 1].k : null;
+      if (typeof k !== 'string' || k === last) return out;
+      last = k;
+    }
+  }
+  async function writeSave(db, rec) {
+    try { await retry(() => db.doc(SAVES + '/' + rec.k).set(rec)); return 'saved'; } catch (_) { return 'fail'; } // same id on a retry: never saved twice
+  }
+
+  /** Adds the list to the saves. Assignments saved before are highlighted and the popup asks whether to save them again.
+   *  Resolves to saved | fail, or null when there is nothing to save or the popup is asking. */
   async function saveList() {
-    const lines = saveLines(state, stamp(new Date())); // the list as it is now, whatever happens while the database answers
-    if (!lines) return null;
+    const at = new Date();
+    const all = saveRecord(state, stamp(at), saveKey(at.getTime(), Math.random().toString(36).slice(2, 8))); // the list as it is now
+    if (!all) return null;
+    const db = await useDb();
+    if (!db) return 'fail';
+    let seen;
+    try { seen = savedIds(await readSaves(db)); } catch (_) { return 'fail'; } // without the history, repeats cannot be told apart
+    const repeats = all.rows.filter((r) => seen.has(r.id)).map((r) => r.id);
+    if (!repeats.length) return writeSave(db, all);
+    const rows = all.rows.filter((r) => !seen.has(r.id));
+    openAgain({ db, all, fresh: rows.length ? { ...all, rows } : null }, repeats);
+    return null;
+  }
+
+  /** Every save as one CSV file. Resolves to downloaded | empty | dlfail, or null when the viewer declined the download. */
+  async function downloadSaves() {
+    const db = await useDb();
+    if (!db) return 'dlfail';
     let csv;
-    try {
-      const db = window.claude && window.claude.use ? await window.claude.use('db') : null;
-      if (!db) return 'fail';
-      const log = db.doc(SAVES_DOC);
-      let snap = null;
-      for (let a = 0; a < 2 && !snap; a++) {
-        try { snap = await log.get(); } catch (err) { if (a === 0 && err && err.code === 'unavailable') await sleep(600); else break; }
-      }
-      if (!snap) return 'fail'; // never write over a log that could not be read
-      const old = snap.exists ? snap.data() : null;
-      csv = ((old && typeof old.csv === 'string' && old.csv) || SAVE_HEADER) + lines;
-      await log.set({ v: 1, csv });
-    } catch (_) { return 'fail'; }
+    try { csv = savesCsv(await readSaves(db)); } catch (_) { return 'dlfail'; }
+    if (!csv) return 'empty';
     try {
       const dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null;
-      if (dl) { await dl.save({ filename: SAVES_FILE, data: new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }) }); return 'saved'; } // the BOM lets Excel read accents
-    } catch (_) { /* declined or refused: the log has it anyway */ }
-    return 'logged';
+      if (!dl) return 'dlfail';
+      const name = 'assignment-saves-' + stamp(new Date()).slice(0, 10) + '.csv';
+      await dl.save({ filename: name, data: new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }) }); // the BOM lets Excel read accents
+      return 'downloaded';
+    } catch (err) {
+      return err && err.code === 'declined' ? null : 'dlfail';
+    }
   }
-  sav.addEventListener('click', async () => {
-    if (saveBusy) return;
+
+  /* The popup above the save button: save the highlighted assignments again (check), or save only the new ones (x).
+     Esc, a click elsewhere or a second click on the save button cancels the whole save. */
+  function openAgain(a, ids) {
+    again = a;
+    for (const id of ids) { const el = els.get(id); if (el) el.classList.add('again'); }
+    hideTip();
+    againPop.hidden = false;
+    againYes.focus();
+  }
+  function closeAgain(refocus) {
+    if (!again) return false;
+    again = null;
+    againPop.hidden = true;
+    for (const el of els.values()) el.classList.remove('again');
+    if (refocus) sav.focus();
+    return true;
+  }
+  async function answerAgain(yes) {
+    const a = again;
+    if (!a || saveBusy) return;
+    closeAgain(true);
+    const rec = yes ? a.all : a.fresh;
     saveBusy = true;
-    try { flashSave(await saveList()); } finally { saveBusy = false; }
+    try { flashSave(rec ? await writeSave(a.db, rec) : 'none'); } finally { saveBusy = false; }
+  }
+  againYes.addEventListener('click', () => answerAgain(true));
+  againNo.addEventListener('click', () => answerAgain(false));
+  againPop.addEventListener('keydown', (e) => { // Tab cycles between the two buttons
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    (document.activeElement === againYes ? againNo : againYes).focus();
+  });
+
+  sav.addEventListener('mousedown', (e) => { if (e.shiftKey) e.preventDefault(); }); // a Shift-click must not select text
+  sav.addEventListener('click', async (e) => {
+    if (closeAgain()) return;
+    if (saveBusy || (!e.shiftKey && sav.classList.contains('off'))) return;
+    saveBusy = true;
+    try { flashSave(await (e.shiftKey ? downloadSaves() : saveList())); } finally { saveBusy = false; }
   });
 
   document.addEventListener('pointerdown', (e) => {
     if (pending && !e.target.closest('.pop')) cancelPending();
     if (armed && !e.target.closest('#clear')) disarm();
     if (!menuPop.hidden && !e.target.closest('#menuPop, #menu')) setMenu(false);
+    if (again && !e.target.closest('#again, #save')) closeAgain();
   }, true);
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
@@ -1187,6 +1318,7 @@ function saveLines(s, at) {
     if (!menuPop.hidden) setMenu(false, true);
     if (pending) cancelPending();
     if (armed) disarm();
+    closeAgain(true);
   });
 
   /* ---------- drag to reorder ---------- */
@@ -1281,7 +1413,7 @@ function saveLines(s, at) {
 
   /* ---------- tooltips: long hover only ---------- */
   const tip = $('#tip');
-  let tipTimer = 0, tipTarget = null;
+  let tipTimer = 0, tipTarget = null, tipPinned = false; // pinned: a save result, which only a click, a key or its own timer takes down
   function showTip(t) {
     const text = t.dataset.tip;
     if (!text) return;
@@ -1298,6 +1430,7 @@ function saveLines(s, at) {
     clearTimeout(tipTimer);
     tipTimer = 0;
     tipTarget = null;
+    tipPinned = false;
     tip.classList.remove('show');
   }
   function armTip(t) {
@@ -1307,7 +1440,7 @@ function saveLines(s, at) {
     tipTarget = t;
     tipTimer = setTimeout(() => showTip(t), 800);
   }
-  document.addEventListener('pointerover', (e) => armTip(e.target.closest && e.target.closest('[data-tip]')));
+  document.addEventListener('pointerover', (e) => { if (!tipPinned) armTip(e.target.closest && e.target.closest('[data-tip]')); });
   document.documentElement.addEventListener('pointerleave', hideTip);
   document.addEventListener('pointerdown', hideTip, true);
   document.addEventListener('keydown', hideTip, true);

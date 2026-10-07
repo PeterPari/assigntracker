@@ -45,8 +45,10 @@ test('a second PUT replaces the document, and there is still one row in the tabl
   assert.equal(n, 1);
 });
 
-test('only tracker/list and tracker/saves exist: other paths are 404 and nothing is stored', async () => {
-  for (const p of ['other/doc', 'tracker', 'tracker/list/extra', 'tracker/List', 'tracker/saves/extra', 'tracker/Saves', '../tracker/list', '']) {
+test('only tracker/list, saves/<id> and the saves collection exist: other paths are 404 and nothing is stored', async () => {
+  const bad = ['other/doc', 'tracker', 'tracker/list/extra', 'tracker/List', 'tracker/saves', 'saves/', 'saves/a/b', 'saves/a.b', 'saves/a%20b',
+    'saves/..', `saves/${'x'.repeat(65)}`, 'Saves/a', 'saves/a/', '../tracker/list', ''];
+  for (const p of bad) {
     const url = `https://site.test/api/db/${p}`;
     assert.equal((await get(url)).status, 404, `GET ${p}`);
     assert.equal((await put(LIST, url)).status, 404, `PUT ${p}`);
@@ -56,16 +58,42 @@ test('only tracker/list and tracker/saves exist: other paths are 404 and nothing
   assert.equal(n, 0);
 });
 
-test('tracker/saves (the CSV log the save button adds to) is its own document, apart from the list', async () => {
-  const SAVES = 'https://site.test/api/db/tracker/saves';
-  assert.deepEqual(await (await get(SAVES)).json(), { data: null });
-  const log = { v: 1, csv: 'Saved,Status\n2026-10-05 14:03:09,Done\n' };
-  assert.equal((await put(log, SAVES)).status, 200);
+const SAVES = 'https://site.test/api/db/saves';
+const save = (k, rows = [{ id: 'r1', name: 'Essay', mins: 30, status: 2 }]) => ({ v: 1, k, at: '2026-10-05 22:00:00', rows });
+
+test('each save is its own document, apart from the list', async () => {
+  const one = save('001791504903000-abc123');
+  assert.deepEqual(await (await get(`${SAVES}/${one.k}`)).json(), { data: null });
+  assert.equal((await put(one, `${SAVES}/${one.k}`)).status, 200);
   assert.equal((await put(LIST)).status, 200);
-  assert.deepEqual((await (await get(SAVES)).json()).data, log);
+  assert.deepEqual((await (await get(`${SAVES}/${one.k}`)).json()).data, one);
   assert.deepEqual((await (await get()).json()).data, LIST);
+  assert.equal((await put(one, `${SAVES}/${one.k}`)).status, 200, 'the same save sent twice (a retry) stays one document');
   const [{ n }] = await db.sql`SELECT count(*)::int AS n FROM docs`;
   assert.equal(n, 2);
+});
+
+test('GET saves returns every save, ordered by id, and nothing else', async () => {
+  assert.deepEqual(await (await get(SAVES)).json(), { docs: [] }, 'no saves yet');
+  const ids = ['001791600000000-b', '001791504903000-a', '001791504903000-c_x'];
+  for (const k of ids) await put(save(k), `${SAVES}/${k}`);
+  await put(LIST);
+  const res = await get(SAVES);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  const { docs } = await res.json();
+  assert.deepEqual(docs.map((d) => d.id), ['001791504903000-a', '001791504903000-c_x', '001791600000000-b'], 'oldest first');
+  for (const d of docs) assert.deepEqual(d.data, save(d.id));
+});
+
+test('the saves collection is read-only: other methods are 405', async () => {
+  for (const method of ['PUT', 'POST', 'DELETE']) {
+    const res = await handle(new Request(SAVES, { method, body: method === 'DELETE' ? undefined : '{}' }));
+    assert.equal(res.status, 405, method);
+    assert.equal(res.headers.get('allow'), 'GET');
+  }
+  const [{ n }] = await db.sql`SELECT count(*)::int AS n FROM docs`;
+  assert.equal(n, 0);
 });
 
 test('other methods are 405 and name the allowed ones', async () => {

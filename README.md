@@ -2,7 +2,7 @@
 
 A one-page assignment tracker with a shared list, a progress bar, optional start and end times, optional subject, due date and assignment type columns, and drag to reorder. It is a single self-contained HTML file (`index.html`), published as a Claude Artifact or deployed on Netlify (see [Deploy on Netlify](#deploy-on-netlify)). Dark theme, system sans-serif, desktop only.
 
-The page shows no words. Everything is an icon (the menu included) except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, tooltips, the one message in the all-done popup, and the picture that popup shares. Tooltips appear after a long hover (800 ms).
+The page shows no words. Everything is an icon (the menu included) except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, tooltips, the one message in the all-done popup, the picture that popup shares, and the question in the save popup. Tooltips appear after a long hover (800 ms).
 
 ## What it does
 
@@ -21,7 +21,8 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 | Due date | Optional column, off by default, between subject and type. A date input; clearing it removes the date. Stored as `YYYY-MM-DD`. |
 | Reload | Circular-arrow icon at the right end of the header. Reloads the page, which reads the shared list again, so changes made on another device show up. A save still waiting is sent first. The icon spins once as it goes (skipped when the system asks for reduced motion). |
 | Clear | Trash icon, bottom-right. First click arms it (red), second click clears the list for every viewer. |
-| Save | Floppy-disk icon, left of the trash. Adds the list to the bottom of one shared save log, then downloads the whole log as `assignment-saves.csv`: every earlier save, then this one. It does not change the list. Greyed out until a row is finished. The result shows as a tooltip on the button, which turns into a check for about two seconds. |
+| Save | Floppy-disk icon, left of the trash. Adds the finished rows to the save history in the shared database, as one save. Nothing is downloaded and the list does not change. Assignments saved on an earlier night are highlighted, and a small popup above the button asks `Would you like to save these again?`: the check saves them again with the rest, the × saves only the new ones. Greyed out until a row is finished. The result shows as a tooltip on the button, which turns into a check for about two seconds. |
+| Download saves | Hidden: Shift-click the save button. Downloads every save so far as one CSV file, `assignment-saves-YYYY-MM-DD.csv`, oldest first. It saves nothing, and works even while the button is greyed (with an empty list, say). The tooltip never mentions it. |
 | Progress | Thick bar at the top with the percentage inside: `½ (done rows ÷ rows + done minutes ÷ total minutes)`. In-progress rows count as 0. |
 | Times | Clock toggle in the menu, off by default. Off: no start or end time is visible anywhere. On: each row shows a 12-hour start and an end (start + duration). An end past midnight is plain clock time (`1:15 AM`). Entered starts persist through off and on. |
 | Chaining | Link toggle in the menu, on by default, shown while times are on. On: only the first row's start is entered, every lower start is the previous end, and with no first start every start and end is blank. Editing the start of a row that follows the row above asks first, with two choices and a cancel: scissors ("Cut and continue") keeps chaining on, gives that row the new start and lets the rows after it continue from it; the broken-link icon ("Disable chaining") turns chaining off. Esc or a click elsewhere cancels. Off: every row uses only its own entered start, and a row with no start has a blank end. Turning chaining on again discards every lower row's own start, including cuts. |
@@ -56,13 +57,14 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 - Closing the share sheet or declining the save confirmation is not an error and shows nothing. A busy confirmation says `Try again in a moment`; a dead end says `Could not share`, and the button works again afterwards.
 - Keyboard focus starts on the × (not the share button), so the Enter that finished the last row cannot share anything. Tab cycles between the two buttons.
 - A small warning icon appears in the header only when the list could not be saved or loaded (no database, view-only access, or a failed write).
-- A web page cannot add to a file on your disk, so the "same file" is the save log kept in the shared database next to the list. Each Save appends to it and downloads a fresh copy of the whole log. Your browser may name repeats `assignment-saves (1).csv`; the newest download is the complete one.
-- A save is one line per finished row, with the columns `Saved, Status, Assignment, Subject, Due, Type, Minutes, Start, End`. `Saved` is the local date and time of the click, the same on every line of one save, which is what tells saves apart. The header is written once, when the log is empty. There are no blank lines between saves, so the file stays a plain table.
-- A save holds everything about the row whatever the menu shows: subject, due date and type are saved even while their columns are hidden, and Start and End are the times the page works out (chained times included), blank when a row has none. `Minutes` is a number, so it can be summed.
-- Unfinished rows (no name or no duration) are left out of a save, as they are left out of the list. Saving the list twice with no change adds it twice.
-- A text cell that starts with `=`, `+`, `-` or `@` is saved with a leading `'`, so a spreadsheet shows it instead of running it as a formula. Cells with a comma, quote or line break are quoted. The file starts with a UTF-8 byte order mark so Excel reads accents correctly.
-- If the log cannot be read, nothing is written over it. If it can be updated but the download is declined or unavailable, the save stays in the log and the tooltip says `Saved, file not downloaded`; pressing Save again adds the list again.
-- The log is one document, up to 256 KB (the limit on every document), which is roughly a hundred saves of a thirty-row list. When it is full, Save says `Could not save` and changes nothing. The latest download still has everything saved before.
+- The save history is meant to pile up night after night, so that one day it can show how long each assignment type usually takes in each subject. Each save is its own small document, so the history has no practical size limit for nightly saving (the Artifact database holds 25,000 documents), and saving never rewrites an earlier save.
+- A repeat is an assignment (the same row, by its id) that is in any earlier save, whatever has changed since. The highlight and the popup show only when there is one; otherwise Save saves at once. The × with only repeats on the list saves nothing and says `Nothing new to save`. Esc, a click anywhere else, or a second click on the save button cancels the whole save. Focus starts on the check, Tab cycles between the two, and focus returns to the save button.
+- To find repeats, Save reads the whole history first. If it cannot (no database, or a failed read), it says `Could not save` and writes nothing. A failed write, or a full database, also says `Could not save`.
+- A save holds everything about each finished row whatever the menu shows: name, subject, type, due date, status, minutes, and the start and end the page works out (chained times included, empty when a row has none). Unfinished rows (no name or no duration) are left out, as they are left out of the list.
+- The download has one line per saved row, with the columns `Saved, Status, Assignment, Subject, Due, Type, Minutes, Start, End, ID`. `Saved` is the local date and time of the click, the same on every line of one save. `ID` is the same on every line of one assignment, so an assignment saved on two nights can be matched up. `Minutes` is a number, so it can be summed or averaged.
+- `Minutes` is the time really spent only for a row marked done while times are shown (marking it done records start-to-now, and its end can be corrected). Otherwise it is the duration you typed: a plan. For the "how long does it usually take" question, count the `Done` rows saved with times on.
+- A text cell that starts with `=`, `+`, `-` or `@` is written with a leading `'`, so a spreadsheet shows it instead of running it as a formula. Cells with a comma, quote or line break are quoted. The file starts with a UTF-8 byte order mark so Excel reads accents correctly.
+- Shift-click with nothing saved says `Nothing saved yet`; when the history cannot be read or no file can go out it says `Could not download`. Declining the download confirmation shows nothing.
 
 ### Subject colors
 
@@ -84,7 +86,7 @@ The matching is `subjectKey` in the `<logic>` block of `index.html`, and the col
 
 ## Data
 
-Two documents in the artifact database (as an Artifact) or in the `docs` table of Netlify Database (on Netlify). `tracker/list` is the list:
+Documents in the artifact database (as an Artifact) or in the `docs` table of Netlify Database (on Netlify). `tracker/list` is the list:
 
 ```json
 {
@@ -104,13 +106,22 @@ Two documents in the artifact database (as an Artifact) or in the `docs` table o
 - The list is read once when the page opens. There is no live sync: the latest write wins, and a viewer sees other people's changes after reopening the page.
 - Writes are debounced, sent one at a time, and skipped when nothing changed. If the list could not be read, the page never writes over it. Edits made before the list arrives are merged in.
 
-`tracker/saves` is the save log behind the Save button. It is read and written only when Save is clicked, never when the page opens:
+Each save is its own document, `saves/<k>`, in the `saves` collection. They are read only when the save button is clicked, never when the page opens:
 
 ```json
-{ "v": 1, "csv": "Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End\n2026-10-05 14:03:09,Done,Essay draft,English,2026-10-14,,150,9:00 AM,11:30 AM\n" }
+{
+  "v": 1,
+  "k": "001791504903000-x7k2q1",
+  "at": "2026-10-07 22:15:03",
+  "rows": [
+    { "id": "lq3k9x2a1b", "name": "Essay draft", "subject": "English", "type": "Essay", "due": "2026-10-14", "status": 2, "mins": 150, "start": 540, "end": 690 }
+  ]
+}
 ```
 
-`csv` is the whole file, and a save only ever adds lines to its end.
+- `k` is the document id: the save time in epoch milliseconds, zero padded to 15 digits so ids sort by time, then a random tail so two saves never collide. The history is read in pages of 500, ordered by `k`.
+- `at` is the local date and time of the click. `start` and `end` are minutes since midnight, or `null`. The other row fields are as in the list.
+- A save is only ever created, never changed. Writing one again with the same `k` (a retry) leaves one document.
 
 ## Drag and drop
 
@@ -126,7 +137,7 @@ scripts/netlify-db-shim.js  gives the page `claude.use('db')` and `claude.use('d
 scripts/make-icons.mjs      draws the app icons into public/ (`npm run icons`)
 public/                     copied into dist/ as is: manifest.webmanifest, apple-touch-icon.png, icons/*.png
 netlify/functions/db.mjs    Netlify Function for /api/db/*
-netlify/lib/docs-api.mjs    the handler behind it (GET/PUT the list and the save log), shared with the tests
+netlify/lib/docs-api.mjs    the handler behind it (the list, each save, and the list of saves), shared with the tests
 netlify/edge-functions/auth.mjs  Netlify Edge Function in front of every path: the site password
 netlify/lib/auth.mjs        the Basic Auth check behind it, shared with the tests
 netlify/database/migrations/  SQL migrations for Netlify Database
@@ -169,8 +180,8 @@ Things to know:
 
 `index.html` is an Artifact fragment (no `<html>`, no `<head>`) and its list lives in the Artifact runtime's database. For Netlify, `index.html` stays as it is and the build adds what is missing:
 
-1. `npm run build` (`scripts/build.mjs`) writes `dist/index.html`: a full HTML page with the title and styles in `<head>`, plus `scripts/netlify-db-shim.js`, which provides the same `claude.use('db')` and `claude.use('downloads')` the page already calls. The shim stores the list through `GET`/`PUT /api/db/tracker/list` and the save log through `/api/db/tracker/saves`; "download" is an ordinary browser download.
-2. `netlify/functions/db.mjs` answers `/api/db/*` and keeps the document in the `docs` table of [Netlify Database](https://docs.netlify.com/build/data-and-storage/netlify-database/) (managed Postgres). Only the `tracker/list` and `tracker/saves` documents are accepted, up to 256 KB each.
+1. `npm run build` (`scripts/build.mjs`) writes `dist/index.html`: a full HTML page with the title and styles in `<head>`, plus `scripts/netlify-db-shim.js`, which provides the same `claude.use('db')` and `claude.use('downloads')` the page already calls. The shim stores the list through `GET`/`PUT /api/db/tracker/list` and each save through `PUT /api/db/saves/<k>`, and reads the history with `GET /api/db/saves` (every save, ordered by id; the shim applies the query's filter, order and limit). "Download" is an ordinary browser download.
+2. `netlify/functions/db.mjs` answers `/api/db/*` and keeps the document in the `docs` table of [Netlify Database](https://docs.netlify.com/build/data-and-storage/netlify-database/) (managed Postgres). Only `tracker/list` and `saves/<k>` (`k` up to 64 letters, digits, `-` or `_`) are accepted, up to 256 KB each, plus `GET` on the `saves` collection. No migration is needed for the saves: they are rows of the same `docs` table.
 3. `netlify/database/migrations/` creates the table. Netlify applies migrations automatically before every production deploy and deploy preview. Each deploy preview gets its own database branch seeded from production, so previews never touch the live list.
 4. `netlify/edge-functions/auth.mjs` puts the site behind one shared password, so Netlify's own site password (a Pro plan feature) is not needed. It runs before everything else, so it guards the page and `/api/db/*` alike (only the manifest and the app icons are left open, see [Install as an app](#install-as-an-app-mac)). The browser asks for the password once with its own login box (HTTP Basic Auth); the username is ignored, so anything works. The password is the `SITE_PASSWORD` environment variable, never part of the repository.
 
@@ -184,8 +195,8 @@ Things to know:
 
 - There are no accounts, only the one shared password. Anyone who has it can read, edit and clear the list, just as a shared Artifact lets everyone write. The Claude Artifact copy is not on Netlify, so the password does not apply to it.
 - Sync works as before: the list is read once when the page opens and the latest write wins. A save that fails shows the warning icon, and a list that could not be read is never overwritten.
-- On Netlify the share button tries the share sheet, then the clipboard, then saves a PNG; the save is a plain download with no confirmation step. The save button's CSV is the same kind of plain download.
+- On Netlify the share button tries the share sheet, then the clipboard, then saves a PNG; the save is a plain download with no confirmation step. The saves CSV (Shift-click on save) is the same kind of plain download.
 
 ## Publish as a Claude Artifact
 
-Publish `index.html` as a Claude Artifact with the `db` and `downloads` capabilities (`capabilities: { db: {}, downloads: true }`). `downloads` is how the share button saves a picture when the clipboard refuses, and how the save button hands over its CSV (each one asks the viewer to confirm). Anyone who can write shared data (Contributor and up) can edit the list; view-only viewers see the list and the warning icon if they try.
+Publish `index.html` as a Claude Artifact with the `db` and `downloads` capabilities (`capabilities: { db: {}, downloads: true }`). `downloads` is how the share button saves a picture when the clipboard refuses, and how Shift-click on the save button hands over the saves CSV (each one asks the viewer to confirm). Anyone who can write shared data (Contributor and up) can edit the list; view-only viewers see the list and the warning icon if they try.

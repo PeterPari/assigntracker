@@ -515,15 +515,23 @@ test('clear: first click arms, second click clears for everyone; arming expires 
   });
 });
 
-const HEAD = 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End\n';
-const log = (page) => page.evaluate(() => window.__db.store['tracker/saves']);
+const HEAD = 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End,ID\n';
+const saves = (page) => page.evaluate(() => Object.keys(window.__db.store).filter((k) => k.startsWith('saves/')).sort().map((k) => window.__db.store[k]));
 const fileText = (page, n) => page.evaluate((k) => window.__db.downloads[k].data.text(), n); // text() drops a leading byte order mark
 const fileBom = (page, n) => page.evaluate(async (k) => Array.from(new Uint8Array(await window.__db.downloads[k].data.slice(0, 3).arrayBuffer())), n);
 const saveTip = (page) => page.evaluate(() => { const t = document.querySelector('#tip'); return t.classList.contains('show') ? t.textContent : null; });
-const clickSave = async (page) => { await page.click('#save'); await page.waitForTimeout(200); };
+const saveLook = (page) => page.$eval('#save', (b) => [b.classList.contains('ok'), b.classList.contains('bad')]);
+const clickSave = async (page, modifiers) => { await page.click('#save', { modifiers, force: true }); await page.waitForTimeout(200); }; // force: Playwright will not click an aria-disabled button
+const shiftSave = (page) => clickSave(page, ['Shift']);
+const downloads = (page) => page.evaluate(() => window.__db.downloads.length);
+const asking = (page) => page.locator('#again').isVisible();
+const highlighted = (page) => page.$$eval('.row.again .nmi', (els) => els.map((e) => e.value));
+const pastSave = (k, at, rows) => ({ [`saves/${k}`]: { v: 1, k, at, rows } });
+const srow = (id, name, o = {}) => ({ id, name, subject: '', type: '', due: null, status: 2, mins: 30, start: null, end: null, ...o });
 const saveRows = [R('a', 'Read ch. 4', 45, { start: H(15, 30), subject: 'Biology', due: '2026-10-09', type: 'Homework' }), R('b', 'Essay, "final"', 90)];
+const KEY = /^\d{15}-[a-z0-9]+$/;
 
-test('save: an icon-only button sits left of the trash, and is off until a row is finished', async () => {
+test('save: an icon-only button sits left of the trash, greyed until a row is finished', async () => {
   await withPage({}, async (page) => {
     assert.equal(await page.getAttribute('#save', 'data-tip'), 'Save');
     assert.equal(await page.getAttribute('#save', 'aria-label'), 'Save');
@@ -532,98 +540,211 @@ test('save: an icon-only button sits left of the trash, and is off until a row i
     const s = await page.locator('#save').boundingBox(), c = await page.locator('#clear').boundingBox();
     assert.ok(s.x + s.width < c.x && c.x - (s.x + s.width) < 16, 'right beside the trash');
     assert.ok(Math.abs(s.y - c.y) < 1 && s.width === c.width && s.height === c.height, 'same row, same size');
-    assert.equal(await page.locator('#save').isDisabled(), true, 'nothing to save');
+    const off = () => page.$eval('#save', (b) => [b.classList.contains('off'), b.getAttribute('aria-disabled'), getComputedStyle(b).opacity]);
+    assert.deepEqual(await off(), [true, 'true', '0.35'], 'nothing to save');
+    await clickSave(page);
+    assert.deepEqual(await saves(page), [], 'a click on the greyed button does nothing');
+    assert.equal(await saveTip(page), null);
     await page.click('#add');
-    assert.equal(await page.locator('#save').isDisabled(), true, 'an unfinished row is not a save');
+    assert.equal((await off())[0], true, 'an unfinished row is not a save');
     await page.keyboard.type('Essay');
     await page.keyboard.press('Enter');
     await page.keyboard.type('1');
     await page.keyboard.press('Enter');
-    assert.equal(await page.locator('#save').isDisabled(), false);
+    assert.deepEqual(await off(), [false, 'false', '1']);
   });
 });
 
-test('save: the list goes under what was saved before, and the whole file is offered each time', async () => {
-  const old = 'old-line\n';
-  const initial = { ...doc(saveRows, { times: false, chain: true }), 'tracker/saves': { v: 1, csv: HEAD + old } };
-  await withPage({ initial, now: [14, 3] }, async (page) => {
+test('save: adds the finished rows to the database as one save, downloads nothing, and leaves the list alone', async () => {
+  await withPage({ initial: doc(saveRows), now: [22, 15] }, async (page) => {
     await page.click('#add'); // an unfinished row is left out
+    await page.keyboard.press('Escape');
     await clickSave(page);
-    const first = HEAD + old
-      + '2026-10-05 14:03:20,Not started,Read ch. 4,Biology,2026-10-09,Homework,45,3:30 PM,4:15 PM\n'
-      + '2026-10-05 14:03:20,Not started,"Essay, ""final""",,,,90,4:15 PM,5:45 PM\n';
-    assert.equal((await log(page)).csv, first);
-    assert.equal(await page.evaluate(() => window.__db.downloads.length), 1);
-    assert.equal(await page.evaluate(() => window.__db.downloads[0].filename), 'assignment-saves.csv');
-    assert.equal(await fileText(page, 0), first, 'the file is the whole log');
-    assert.deepEqual(await fileBom(page, 0), [0xEF, 0xBB, 0xBF], 'with a UTF-8 byte order mark, so Excel reads accents');
+    const [one, ...more] = await saves(page);
+    assert.equal(more.length, 0, 'one save');
+    assert.match(one.k, KEY);
+    assert.equal(await page.evaluate((k) => !!window.__db.store['saves/' + k], one.k), true, 'stored under its own key');
+    assert.deepEqual(one, {
+      v: 1, k: one.k, at: '2026-10-05 22:15:20',
+      rows: [
+        { id: 'a', name: 'Read ch. 4', subject: 'Biology', type: 'Homework', due: '2026-10-09', status: 0, mins: 45, start: H(15, 30), end: H(16, 15) },
+        { id: 'b', name: 'Essay, "final"', subject: '', type: '', due: null, status: 0, mins: 90, start: H(16, 15), end: H(17, 45) },
+      ],
+    });
+    assert.equal(Number(one.k.slice(0, 15)), new Date(2026, 9, 5, 22, 15, 20).getTime(), 'the key starts with the time');
+    assert.equal(await downloads(page), 0, 'no file');
+    assert.equal(await asking(page), false, 'nothing to ask the first time');
     assert.equal(await saveTip(page), 'Saved');
-    assert.deepEqual(await page.$eval('#save', (b) => [b.classList.contains('ok'), b.classList.contains('bad')]), [true, false]);
-
-    // change the list and save again: the new lines land at the bottom of the same log
-    await page.click('.row:nth-child(1) .st');
-    await page.click('.row:nth-child(1) .st');
-    await setNow(page, 16, 0);
+    assert.deepEqual(await saveLook(page), [true, false]);
     await page.waitForTimeout(2400);
     assert.equal(await page.getAttribute('#save', 'data-tip'), 'Save', 'the icon goes back after a moment');
-    await clickSave(page);
-    const second = first
-      + '2026-10-05 16:00:20,Done,Read ch. 4,Biology,2026-10-09,Homework,45,3:30 PM,4:15 PM\n'
-      + '2026-10-05 16:00:20,Not started,"Essay, ""final""",,,,90,4:15 PM,5:45 PM\n';
-    assert.equal((await log(page)).csv, second);
-    assert.equal(await page.evaluate(() => window.__db.downloads.length), 2);
-    assert.equal(await fileText(page, 1), second);
-    assert.equal(second.split(HEAD).length, 2, 'one header, however many saves');
+    assert.equal(await saveTip(page), null);
     await settle(page);
-    assert.deepEqual((await saved(page)).rows.map((r) => [r.name, r.status]), [['Read ch. 4', 2], ['Essay, "final"', 0]], 'the live list is untouched by saving');
+    assert.deepEqual((await saved(page)).rows.map((r) => r.id), ['a', 'b'], 'the list is untouched by saving');
   });
 });
 
-test('save: the first save starts the file with its header, and a log from another device is added to', async () => {
-  await withPage({ initial: doc([R('a', 'One', 30)]), now: [9, 0] }, async (page) => {
+const seen = { ...doc([...saveRows, R('c', 'Lab notes', 20)]), ...pastSave('001791000000000-old', '2026-10-04 21:00:00', [srow('a', 'Read ch. 4'), srow('b', 'Essay')]) };
+
+test('save: assignments saved before are highlighted and the popup asks; the check saves them again', async () => {
+  await withPage({ initial: seen, now: [22, 0] }, async (page) => {
     await clickSave(page);
-    assert.equal((await log(page)).csv, HEAD + '2026-10-05 09:00:20,Not started,One,,,,30,,\n');
-    await page.evaluate(() => { window.__db.store['tracker/saves'].csv += 'from another device\n'; });
-    await clickSave(page);
-    assert.equal((await log(page)).csv, HEAD + '2026-10-05 09:00:20,Not started,One,,,,30,,\nfrom another device\n2026-10-05 09:00:20,Not started,One,,,,30,,\n');
+    assert.equal(await asking(page), true);
+    assert.equal(await page.textContent('#againQ'), 'Would you like to save these again?');
+    assert.deepEqual(await highlighted(page), ['Read ch. 4', 'Essay, "final"'], 'only the repeats light up');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'againYes', 'focus starts on the check');
+    assert.equal(await page.getAttribute('#againYes', 'data-tip'), 'Save them again');
+    assert.equal(await page.getAttribute('#againNo', 'data-tip'), 'Skip them');
+    assert.equal((await saves(page)).length, 1, 'nothing is written while it asks');
+    const p = await page.locator('#again').boundingBox(), s = await page.locator('#save').boundingBox();
+    assert.ok(p.y + p.height <= s.y && p.x < s.x + s.width && p.x + p.width > s.x, 'just above the save button');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'againNo');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'againYes', 'Tab cycles between the two');
+    await page.click('#againYes');
+    await page.waitForTimeout(200);
+    assert.equal(await asking(page), false);
+    assert.deepEqual(await highlighted(page), [], 'the highlight goes with the popup');
+    const all = await saves(page);
+    assert.equal(all.length, 2);
+    assert.deepEqual(all[1].rows.map((r) => r.id), ['a', 'b', 'c'], 'every row, repeats included');
+    assert.equal(await saveTip(page), 'Saved');
   });
 });
 
-test('save: a log that cannot be read is never written over, and a failed write says so', async () => {
-  const keep = { v: 1, csv: HEAD + 'precious\n' };
-  await withPage({ initial: { ...doc([R('a', 'One', 30)]), 'tracker/saves': keep } }, async (page) => {
-    await page.evaluate(() => { window.__db.failGet = 'failed'; });
+test('save: the x saves only the new assignments, and with nothing new it says so and writes nothing', async () => {
+  await withPage({ initial: seen, now: [22, 0] }, async (page) => {
+    await clickSave(page);
+    await page.click('#againNo');
+    await page.waitForTimeout(200);
+    let all = await saves(page);
+    assert.equal(all.length, 2);
+    assert.deepEqual(all[1].rows, [{ id: 'c', name: 'Lab notes', subject: '', type: '', due: null, status: 0, mins: 20, start: H(17, 45), end: H(18, 5) }],
+      'the new row keeps the times worked out with the whole list');
+    assert.equal(await saveTip(page), 'Saved');
+    await page.waitForTimeout(2400);
+    await clickSave(page);
+    assert.deepEqual(await highlighted(page), ['Read ch. 4', 'Essay, "final"', 'Lab notes'], 'now every row is a repeat');
+    await page.click('#againNo');
+    await page.waitForTimeout(200);
+    assert.equal(await saveTip(page), 'Nothing new to save');
+    assert.deepEqual(await saveLook(page), [false, false], 'not an error');
+    all = await saves(page);
+    assert.equal(all.length, 2, 'nothing written');
+  });
+});
+
+test('save: Esc, a click elsewhere, or a second click on save cancels the whole save', async () => {
+  await withPage({ initial: seen }, async (page) => {
+    await clickSave(page);
+    assert.equal(await asking(page), true);
+    await page.keyboard.press('Escape');
+    assert.equal(await asking(page), false);
+    assert.deepEqual(await highlighted(page), []);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'save', 'focus goes back to the save button');
+    await clickSave(page);
+    assert.equal(await asking(page), true);
+    await page.click('#bar');
+    assert.equal(await asking(page), false);
+    assert.deepEqual(await highlighted(page), []);
+    await clickSave(page);
+    assert.equal(await asking(page), true);
+    await clickSave(page);
+    assert.equal(await asking(page), false, 'the second click closes it and does not ask again');
+    assert.deepEqual(await highlighted(page), []);
+    assert.equal((await saves(page)).length, 1, 'nothing written');
+    assert.equal(await saveTip(page), null);
+  });
+});
+
+const history = {
+  ...pastSave('001791100000000-b', '2026-10-05 21:30:00', [srow('a', 'Read ch. 4', { subject: 'Biology', type: 'Homework', mins: 50, start: H(15, 30), end: H(16, 20) })]),
+  ...pastSave('001791000000000-a', '2026-10-04 22:15:03', [
+    srow('a', 'Read ch. 4', { subject: 'Biology', type: 'Homework', due: '2026-10-09', status: 1, mins: 45, start: H(15, 30), end: H(16, 15) }),
+    srow('b', 'Essay, "final"', { status: 0, mins: 90 }),
+  ]),
+};
+const HISTORY_CSV = HEAD
+  + '2026-10-04 22:15:03,In progress,Read ch. 4,Biology,2026-10-09,Homework,45,3:30 PM,4:15 PM,a\n'
+  + '2026-10-04 22:15:03,Not started,"Essay, ""final""",,,,90,,,b\n'
+  + '2026-10-05 21:30:00,Done,Read ch. 4,Biology,,Homework,50,3:30 PM,4:20 PM,a\n';
+
+test('save: Shift-click downloads every save as one file, oldest first, and saves nothing', async () => {
+  await withPage({ initial: { ...doc([R('x', 'Tonight', 30)]), ...history }, now: [23, 0] }, async (page) => {
+    await shiftSave(page);
+    assert.equal(await downloads(page), 1);
+    assert.equal(await page.evaluate(() => window.__db.downloads[0].filename), 'assignment-saves-2026-10-05.csv');
+    assert.equal(await fileText(page, 0), HISTORY_CSV);
+    assert.deepEqual(await fileBom(page, 0), [0xEF, 0xBB, 0xBF], 'with a UTF-8 byte order mark, so Excel reads accents');
+    assert.equal(await page.evaluate(() => window.__db.downloads[0].data.type), 'text/csv;charset=utf-8');
+    assert.equal((await saves(page)).length, 2, 'nothing saved');
+    assert.equal(await asking(page), false);
+    assert.equal(await saveTip(page), 'Downloaded');
+    assert.deepEqual(await saveLook(page), [true, false]);
+    assert.equal(await page.evaluate(() => window.getSelection().toString()), '', 'Shift-click selects no text');
+  });
+});
+
+test('save: Shift-click works with an empty list, while the button is greyed', async () => {
+  await withPage({ initial: { ...doc([]), ...history } }, async (page) => {
+    assert.equal(await page.$eval('#save', (b) => b.classList.contains('off')), true);
+    await shiftSave(page);
+    assert.equal(await downloads(page), 1);
+    assert.equal(await fileText(page, 0), HISTORY_CSV);
+  });
+});
+
+test('save: Shift-click with nothing saved says so; a history that cannot be read, or no downloads, says it could not download', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
+    await shiftSave(page);
+    assert.equal(await saveTip(page), 'Nothing saved yet');
+    assert.deepEqual(await saveLook(page), [false, false]);
+    assert.equal(await downloads(page), 0);
+    await page.waitForTimeout(2400);
+    await page.evaluate(() => { window.__db.failQuery = 'failed'; });
+    await shiftSave(page);
+    assert.equal(await saveTip(page), 'Could not download');
+    assert.deepEqual(await saveLook(page), [false, true]);
+    await page.waitForTimeout(2400);
+    await page.evaluate(() => { window.__db.failQuery = null; window.__db.noDownloads = true; });
+    await clickSave(page); // a plain click saves, so there is something to download
+    await page.waitForTimeout(2400);
+    await shiftSave(page);
+    assert.equal(await saveTip(page), 'Could not download');
+    assert.equal((await saves(page)).length, 1);
+  });
+});
+
+test('save: a declined download shows nothing and the button works again', async () => {
+  await withPage({ initial: { ...doc([R('a', 'One', 30)]), ...history } }, async (page) => {
+    await page.evaluate(() => { window.__db.downloadFail = 'declined'; });
+    await shiftSave(page);
+    assert.equal(await saveTip(page), null);
+    assert.equal(await page.getAttribute('#save', 'data-tip'), 'Save');
+    await page.evaluate(() => { window.__db.downloadFail = null; });
+    await shiftSave(page);
+    assert.equal(await downloads(page), 1);
+  });
+});
+
+test('save: a history that cannot be read writes nothing, a failed write says so, and the button works again', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
+    await page.evaluate(() => { window.__db.failQuery = 'failed'; });
     await clickSave(page);
     assert.equal(await saveTip(page), 'Could not save');
-    assert.deepEqual(await page.$eval('#save', (b) => [b.classList.contains('ok'), b.classList.contains('bad')]), [false, true]);
-    assert.deepEqual(await log(page), keep, 'the read failed, so nothing was written');
-    assert.equal(await page.evaluate(() => window.__db.downloads.length), 0, 'and no file went out');
-    await page.evaluate(() => { window.__db.failGet = null; window.__db.failWith = 'failed'; });
+    assert.deepEqual(await saveLook(page), [false, true]);
+    assert.deepEqual(await saves(page), [], 'repeats could not be checked, so nothing was written');
+    await page.evaluate(() => { window.__db.failQuery = null; window.__db.failWith = 'quota_exceeded'; });
     await page.waitForTimeout(2400);
     await clickSave(page);
     assert.equal(await saveTip(page), 'Could not save');
-    assert.deepEqual(await log(page), keep);
-    assert.equal(await page.evaluate(() => window.__db.downloads.length), 0);
+    assert.deepEqual(await saves(page), []);
     await page.evaluate(() => { window.__db.failWith = null; });
     await page.waitForTimeout(2400);
     await clickSave(page);
-    assert.equal(await saveTip(page), 'Saved', 'the button works again afterwards');
-    assert.equal((await log(page)).csv.startsWith(HEAD + 'precious\n'), true);
-  });
-});
-
-test('save: when no file can go out, the save is still kept in the log', async () => {
-  await withPage({ initial: doc([R('a', 'One', 30)]), now: [9, 0] }, async (page) => {
-    await page.evaluate(() => { window.__db.downloadFail = 'declined'; });
-    await clickSave(page);
-    assert.equal(await saveTip(page), 'Saved, file not downloaded');
-    assert.equal((await log(page)).csv, HEAD + '2026-10-05 09:00:20,Not started,One,,,,30,,\n');
-    await page.evaluate(() => { window.__db.downloadFail = null; window.__db.noDownloads = true; });
-    await page.waitForTimeout(2400);
-    await clickSave(page);
-    assert.equal(await saveTip(page), 'Saved, file not downloaded');
-    assert.equal((await log(page)).csv.split('\n').length, 4, 'header and two saves');
-    assert.equal(await page.evaluate(() => window.__db.downloads.length), 0);
+    assert.equal(await saveTip(page), 'Saved');
+    assert.equal((await saves(page)).length, 1);
   });
 });
 
@@ -632,8 +753,27 @@ test('save: a double click saves once', async () => {
     await page.evaluate(() => { window.__db.delay = 150; });
     await page.dblclick('#save');
     await page.waitForTimeout(700);
-    assert.equal((await log(page)).csv.split('\n').length, 3, 'header and one line');
-    assert.equal(await page.evaluate(() => window.__db.downloads.length), 1);
+    assert.equal((await saves(page)).length, 1);
+    assert.equal(await asking(page), false);
+  });
+});
+
+test('save: a long history is read a page at a time, both to find repeats and to download', async () => {
+  const many = {};
+  for (let i = 0; i < 1203; i++) Object.assign(many, pastSave(String(1791000000000 + i * 1000).padStart(15, '0') + '-r', '2026-01-01 00:00:00', [srow('old' + i, 'Old ' + i)]));
+  Object.assign(many, pastSave('001791999999999-z', '2026-10-04 22:00:00', [srow('a', 'Last night')]));
+  await withPage({ initial: { ...doc([R('a', 'Last night', 30)]), ...many } }, async (page) => {
+    await clickSave(page);
+    await page.waitForTimeout(300);
+    assert.equal(await asking(page), true, 'the repeat is in the last page');
+    assert.equal(await page.evaluate(() => window.__db.queries), 3, '500 + 500 + 204');
+    await page.keyboard.press('Escape');
+    await shiftSave(page);
+    await page.waitForTimeout(300);
+    const lines = (await fileText(page, 0)).trim().split('\n');
+    assert.equal(lines.length, 1 + 1204);
+    assert.equal(lines[1].endsWith(',old0'), true);
+    assert.equal(lines[1204].endsWith(',a'), true, 'every save, in order');
   });
 });
 

@@ -6,7 +6,7 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow, validDue, colsOf, subjectKey, csvCell, stamp, saveLines, SAVE_HEADER };`)();
+const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow, validDue, colsOf, subjectKey, csvCell, stamp, SAVE_HEADER, saveKey, saveRecord, savedIds, savesCsv };`)();
 
 const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, subject: '', due: null, type: '', ...o });
 const NO_COLS = { subject: false, due: false, type: false };
@@ -313,30 +313,72 @@ test('stamp is local date and time, zero padded', () => {
   assert.equal(L.stamp(new Date(2026, 0, 2, 0, 0, 0)), '2026-01-02 00:00:00');
 });
 
-test('saveLines: a line per finished row with every column, stamped, in list order', () => {
+test('saveKey is the time, zero padded so keys sort by time, then the random tail', () => {
+  assert.equal(L.saveKey(1791504903000, 'abc123'), '001791504903000-abc123');
+  assert.equal(L.saveKey(5, 'x'), '000000000000005-x');
+  assert.ok(L.saveKey(999, 'z') < L.saveKey(1000, 'a'), 'an earlier save sorts first, whatever its tail');
+});
+
+test('saveRecord: every finished row with every field, the worked-out start and end, stamped, in list order', () => {
   const s = { rows: [
     row('Read ch. 4', 45, { status: 2, subject: 'Biology', due: '2026-10-09', type: 'Homework', start: H(15, 30) }),
-    row('Essay "draft", v2', 90),
+    row('Essay', 90, { subject: ' English ' }),
   ], times: false, chain: true, cols: NO_COLS };
-  const lines = L.saveLines(s, '2026-10-05 14:03:09');
-  assert.equal(lines, [
-    '2026-10-05 14:03:09,Done,Read ch. 4,Biology,2026-10-09,Homework,45,3:30 PM,4:15 PM',
-    '2026-10-05 14:03:09,Not started,"Essay ""draft"", v2",,,,90,4:15 PM,5:45 PM',
+  assert.deepEqual(L.saveRecord(s, '2026-10-05 14:03:09', 'K'), {
+    v: 1, k: 'K', at: '2026-10-05 14:03:09',
+    rows: [
+      { id: 'Read ch. 4', name: 'Read ch. 4', subject: 'Biology', type: 'Homework', due: '2026-10-09', status: 2, mins: 45, start: H(15, 30), end: H(16, 15) },
+      { id: 'Essay', name: 'Essay', subject: 'English', type: '', due: null, status: 0, mins: 90, start: H(16, 15), end: H(17, 45) },
+    ],
+  }, 'the chained start follows the row above; text is trimmed; columns hidden in the menu are saved anyway');
+});
+
+test('saveRecord: unchained rows use only their own start; unfinished rows are left out; nothing finished is null', () => {
+  const s = { rows: [row('a', 30, { status: 1, start: H(23, 45) }), row('b', 30), row('', 20), row('c', 0)], times: true, chain: false, cols: NO_COLS };
+  const rec = L.saveRecord(s, 'T', 'K');
+  assert.deepEqual(rec.rows.map((r) => [r.id, r.start, r.end]), [['a', H(23, 45), H(0, 15)], ['b', null, null]], 'an end past midnight wraps');
+  assert.equal(L.saveRecord({ rows: [row('', 30), row('x', 0)], times: false, chain: true, cols: NO_COLS }, 'T', 'K'), null);
+  assert.equal(L.saveRecord({ rows: [], times: false, chain: true, cols: NO_COLS }, 'T', 'K'), null);
+});
+
+const rec = (k, at, rows) => ({ v: 1, k, at, rows });
+const srow = (id, o = {}) => ({ id, name: id, subject: '', type: '', due: null, status: 2, mins: 30, start: null, end: null, ...o });
+
+test('savedIds collects every assignment id across saves, and ignores what is malformed', () => {
+  const ids = L.savedIds([
+    rec('1', 'T', [srow('a'), srow('b')]),
+    rec('2', 'T', [srow('b'), srow('c'), null, { name: 'no id' }, { id: '' }, { id: 5 }]),
+    null, 'junk', { rows: [srow('nokey')] }, { k: '3', rows: 'nope' },
+  ]);
+  assert.deepEqual([...ids].sort(), ['a', 'b', 'c']);
+  assert.equal(L.savedIds([]).size, 0);
+});
+
+test('savesCsv: the header, then every saved row, oldest save first, with the ID column', () => {
+  const csv = L.savesCsv([
+    rec('002', '2026-10-06 21:00:00', [srow('a', { name: 'Read ch. 4', subject: 'Biology', type: 'Homework', due: '2026-10-09', mins: 50, start: H(15, 30), end: H(16, 20) })]),
+    rec('001', '2026-10-05 22:15:03', [
+      srow('a', { name: 'Read ch. 4', subject: 'Biology', type: 'Homework', due: '2026-10-09', status: 1, mins: 45, start: H(15, 30), end: H(16, 15) }),
+      srow('b', { name: 'Essay "draft", v2', status: 0, mins: 90 }),
+    ]),
+  ]);
+  assert.equal(csv, [
+    'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End,ID',
+    '2026-10-05 22:15:03,In progress,Read ch. 4,Biology,2026-10-09,Homework,45,3:30 PM,4:15 PM,a',
+    '2026-10-05 22:15:03,Not started,"Essay ""draft"", v2",,,,90,,,b',
+    '2026-10-06 21:00:00,Done,Read ch. 4,Biology,2026-10-09,Homework,50,3:30 PM,4:20 PM,a',
     '',
-  ].join('\n'), 'columns stay in place when blank, and the chained start follows the row above');
-  assert.equal(L.SAVE_HEADER, 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End\n');
+  ].join('\n'));
+  assert.equal(L.SAVE_HEADER, 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End,ID\n');
 });
 
-test('saveLines: unchained rows use only their own start, in progress reads as text, columns do not depend on the menu', () => {
-  const s = { rows: [row('a', 30, { status: 1, start: H(9) }), row('b', 30)], times: false, chain: false, cols: NO_COLS };
-  assert.equal(L.saveLines(s, 'T'), 'T,In progress,a,,,,30,9:00 AM,9:30 AM\nT,Not started,b,,,,30,,\n');
-});
-
-test('saveLines skips unfinished rows and is empty when nothing is finished', () => {
-  const s = { rows: [row('', 30), row('no time', 0), row('ok', 10)], times: true, chain: true, cols: NO_COLS };
-  assert.equal(L.saveLines(s, 'T'), 'T,Not started,ok,,,,10,,\n');
-  assert.equal(L.saveLines({ rows: [row('', 30), row('x', 0)], times: false, chain: true, cols: NO_COLS }, 'T'), '');
-  assert.equal(L.saveLines({ rows: [], times: false, chain: true, cols: NO_COLS }, 'T'), '');
+test('savesCsv is empty with nothing saved, and keeps bad shared data from breaking the file or running as a formula', () => {
+  assert.equal(L.savesCsv([]), '');
+  assert.equal(L.savesCsv([null, { rows: [srow('nokey')] }, rec('1', 'T', [])]), '');
+  const csv = L.savesCsv([rec('1', 5, [
+    srow('=cmd', { name: '=HYPERLINK("x")', subject: 7, type: null, due: {}, status: 'length', mins: 'many', start: 99999, end: -1 }),
+  ])]);
+  assert.equal(csv.split('\n')[1], `,Not started,"'=HYPERLINK(""x"")",,,,,,,'=cmd`);
 });
 
 test('subjectKey maps the eight classes, in any case and spacing', () => {
