@@ -702,7 +702,7 @@ test('only allowed text is visible: placeholders, units, clock text, percent, to
     });
     assert.deepEqual(stray, [], 'unexpected visible text');
     const ph = await page.$$eval('input', (i) => i.filter((x) => x.offsetParent).map((x) => x.placeholder).filter(Boolean));
-    for (const p of ph) assert.match(p, /^(Assignment|0|--|--:-- --)$/);
+    for (const p of ph) assert.match(p, /^(Assignment|Subject|Assignment type|0|--|--:-- --)$/);
   });
 });
 
@@ -1686,5 +1686,33 @@ test('columns: a row can still be dragged from the subject cell, without editing
     await page.waitForTimeout(250);
     assert.deepEqual(await names(page), ['b', 'c', 'a']);
     assert.equal(await page.evaluate(() => document.activeElement.tagName), 'BODY', 'nothing is being edited');
+  });
+});
+
+test('columns: empty subject and type show the grey placeholders "Subject" and "Assignment type", which fit and go away once typed', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)], ALL_COLS) }, async (page) => {
+    assert.equal(await page.getAttribute('.row .sbi', 'placeholder'), 'Subject');
+    assert.equal(await page.getAttribute('.row .tyi', 'placeholder'), 'Assignment type');
+    const ph = await page.$$eval('.row .sbi, .row .tyi, .row .nmi', (els) => els.map((i) => {
+      const cs = getComputedStyle(i), c = document.createElement('span');
+      c.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${cs.font}`;
+      c.textContent = i.placeholder;
+      document.body.appendChild(c);
+      const need = c.getBoundingClientRect().width;
+      c.remove();
+      return { need: Math.ceil(need), have: Math.floor(i.getBoundingClientRect().width), color: getComputedStyle(i, '::placeholder').color };
+    }));
+    for (const p of ph) assert.ok(p.have >= p.need, `placeholder fits (${p.need}px in ${p.have}px)`);
+    assert.equal(ph[0].color, ph[2].color, 'subject has the same grey as the assignment name');
+    assert.equal(ph[1].color, ph[2].color, 'type has the same grey as the assignment name');
+    await page.click('.row .cs');
+    await page.keyboard.type('Math');
+    assert.equal(await page.$eval('.row .sbi', (i) => i.matches(':placeholder-shown')), false, 'typing replaces it');
+    await page.keyboard.press('Enter');
+    await page.click('.row .cs');
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.$eval('.row .sbi', (i) => i.matches(':placeholder-shown')), true, 'and it comes back when emptied');
   });
 });

@@ -16,7 +16,7 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 | Delete | `×` appears when you hover a row. |
 | Reorder | Drag any row, including from its name or status icon. |
 | Menu | Hamburger icon in the header. Opens a small drop-down under it with icon toggles (each has a tooltip): subject (book), due date (calendar), assignment type (tag), then times (clock) and chaining (link). The drop-down stays open while you change several toggles, and closes on a second click on the hamburger, an outside click, Esc (focus returns to the hamburger) or tabbing out. |
-| Subject, Assignment type | Optional columns, off by default, shown right after the name (subject first, type after the due date). Free text, up to 100 characters. Click to edit inline; Enter commits, Esc cancels; empty is fine. A row can be dragged by these cells. |
+| Subject, Assignment type | Optional columns, off by default, shown right after the name (subject first, type after the due date). Free text, up to 100 characters. While empty they show the grey placeholders `Subject` and `Assignment type`, as the name shows `Assignment`. Click to edit inline; Enter commits, Esc cancels; empty is fine. A row can be dragged by these cells. |
 | Due date | Optional column, off by default, between subject and type. A date input; clearing it removes the date. Stored as `YYYY-MM-DD`. |
 | Reload | Circular-arrow icon at the right end of the header. Reloads the page, which reads the shared list again, so changes made on another device show up. A save still waiting is sent first. |
 | Clear | Trash icon, bottom-right. First click arms it (red), second click clears the list for every viewer. |
