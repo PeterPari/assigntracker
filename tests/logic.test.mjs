@@ -6,7 +6,7 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow, validDue, colsOf, csvCell, stamp, saveLines, SAVE_HEADER };`)();
+const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow, validDue, colsOf, subjectKey, csvCell, stamp, saveLines, SAVE_HEADER };`)();
 
 const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, subject: '', due: null, type: '', ...o });
 const NO_COLS = { subject: false, due: false, type: false };
@@ -337,4 +337,27 @@ test('saveLines skips unfinished rows and is empty when nothing is finished', ()
   assert.equal(L.saveLines(s, 'T'), 'T,Not started,ok,,,,10,,\n');
   assert.equal(L.saveLines({ rows: [row('', 30), row('x', 0)], times: false, chain: true, cols: NO_COLS }, 'T'), '');
   assert.equal(L.saveLines({ rows: [], times: false, chain: true, cols: NO_COLS }, 'T'), '');
+});
+
+test('subjectKey maps the eight classes, in any case and spacing', () => {
+  for (const k of ['math', 'history', 'english', 'physics', 'french', 'aics', 'philosophy', 'research']) {
+    assert.equal(L.subjectKey(k), k);
+    assert.equal(L.subjectKey(`  ${k.toUpperCase()} `), k);
+  }
+});
+test('subjectKey accepts common aliases and course names', () => {
+  const cases = {
+    math: ['Maths', 'Mathematics', 'Pre-Calculus', 'precalc', 'Calculus', 'Algebra 2', 'Geometry', 'Statistics'],
+    history: ['US History', 'Advanced US History B', 'World History', 'hist'],
+    english: ['English 11', 'English 11: American Literature-A', 'Lit', 'Literature'],
+    physics: ['Classical Physics A', 'Physics'],
+    french: ['French IV', 'french 4'],
+    aics: ['AICS', 'AI', 'CS', 'Comp Sci', 'Computer Science', 'Adv. AI & Comp Sci'],
+    philosophy: ['Phil', 'Western Philosophy', 'Introduction to Western Philosophy'],
+    research: ['Research Practicum B', 'Practicum', 'research paper'],
+  };
+  for (const [key, subjects] of Object.entries(cases)) for (const s of subjects) assert.equal(L.subjectKey(s), key, s);
+});
+test('subjectKey is empty for an unknown, blank or missing subject', () => {
+  for (const s of ['', '   ', 'Gym', 'Chemistry', 'Maintenance', 'Chair', 'Air quality', 'Aim', 'CSV', 'Philip', 'Historic', null, undefined]) assert.equal(L.subjectKey(s), '', String(s));
 });
