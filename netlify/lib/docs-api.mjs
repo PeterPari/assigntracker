@@ -3,7 +3,7 @@
 // Plain Request in, Response out, so the function entry and the tests share it.
 
 const PREFIX = '/api/db/';
-const PATHS = new Set(['tracker/list']); // a public endpoint: only the page's own document, never arbitrary keys
+const PATHS = new Set(['tracker/list', 'tracker/saves']); // a public endpoint: only the page's own documents (the list, and the CSV log the save button adds to), never arbitrary keys
 export const MAX_BYTES = 256 * 1024;
 
 const reply = (status, body, headers) => new Response(body === undefined ? null : JSON.stringify(body), {

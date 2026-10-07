@@ -6,7 +6,7 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow, validDue, colsOf };`)();
+const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow, validDue, colsOf, csvCell, stamp, saveLines, SAVE_HEADER };`)();
 
 const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, subject: '', due: null, type: '', ...o });
 const NO_COLS = { subject: false, due: false, type: false };
@@ -291,4 +291,50 @@ test('an old document with no column fields loads with every column hidden and e
   assert.deepEqual([h.rows[0].subject, h.rows[0].due, h.rows[0].type], ['', null, '']);
   assert.deepEqual(L.hydrate({ cols: { subject: 'yes', due: 1, type: true } }).cols, { subject: false, due: false, type: true }, 'only true turns a column on');
   assert.deepEqual(L.hydrate({ cols: 'x' }).cols, NO_COLS);
+});
+
+test('csvCell quotes what needs it and keeps a spreadsheet from running text as a formula', () => {
+  assert.equal(L.csvCell('plain'), 'plain');
+  assert.equal(L.csvCell(45), '45');
+  assert.equal(L.csvCell(''), '');
+  assert.equal(L.csvCell('a, b'), '"a, b"');
+  assert.equal(L.csvCell('say "hi"'), '"say ""hi"""');
+  assert.equal(L.csvCell('two\nlines'), '"two\nlines"');
+  assert.equal(L.csvCell('=1+1'), "'=1+1");
+  assert.equal(L.csvCell('-5 problems'), "'-5 problems");
+  assert.equal(L.csvCell('@sum'), "'@sum");
+  assert.equal(L.csvCell('+1,2'), '"\'+1,2"', 'defused first, then quoted');
+  assert.equal(L.csvCell('a=b'), 'a=b', 'only a leading character counts');
+  assert.equal(L.csvCell(-3), '-3', 'numbers are not text');
+});
+
+test('stamp is local date and time, zero padded', () => {
+  assert.equal(L.stamp(new Date(2026, 9, 5, 14, 3, 9)), '2026-10-05 14:03:09');
+  assert.equal(L.stamp(new Date(2026, 0, 2, 0, 0, 0)), '2026-01-02 00:00:00');
+});
+
+test('saveLines: a line per finished row with every column, stamped, in list order', () => {
+  const s = { rows: [
+    row('Read ch. 4', 45, { status: 2, subject: 'Biology', due: '2026-10-09', type: 'Homework', start: H(15, 30) }),
+    row('Essay "draft", v2', 90),
+  ], times: false, chain: true, cols: NO_COLS };
+  const lines = L.saveLines(s, '2026-10-05 14:03:09');
+  assert.equal(lines, [
+    '2026-10-05 14:03:09,Done,Read ch. 4,Biology,2026-10-09,Homework,45,3:30 PM,4:15 PM',
+    '2026-10-05 14:03:09,Not started,"Essay ""draft"", v2",,,,90,4:15 PM,5:45 PM',
+    '',
+  ].join('\n'), 'columns stay in place when blank, and the chained start follows the row above');
+  assert.equal(L.SAVE_HEADER, 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End\n');
+});
+
+test('saveLines: unchained rows use only their own start, in progress reads as text, columns do not depend on the menu', () => {
+  const s = { rows: [row('a', 30, { status: 1, start: H(9) }), row('b', 30)], times: false, chain: false, cols: NO_COLS };
+  assert.equal(L.saveLines(s, 'T'), 'T,In progress,a,,,,30,9:00 AM,9:30 AM\nT,Not started,b,,,,30,,\n');
+});
+
+test('saveLines skips unfinished rows and is empty when nothing is finished', () => {
+  const s = { rows: [row('', 30), row('no time', 0), row('ok', 10)], times: true, chain: true, cols: NO_COLS };
+  assert.equal(L.saveLines(s, 'T'), 'T,Not started,ok,,,,10,,\n');
+  assert.equal(L.saveLines({ rows: [row('', 30), row('x', 0)], times: false, chain: true, cols: NO_COLS }, 'T'), '');
+  assert.equal(L.saveLines({ rows: [], times: false, chain: true, cols: NO_COLS }, 'T'), '');
 });

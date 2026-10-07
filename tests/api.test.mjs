@@ -45,8 +45,8 @@ test('a second PUT replaces the document, and there is still one row in the tabl
   assert.equal(n, 1);
 });
 
-test('only tracker/list exists: other paths are 404 and nothing is stored', async () => {
-  for (const p of ['other/doc', 'tracker', 'tracker/list/extra', 'tracker/List', '../tracker/list', '']) {
+test('only tracker/list and tracker/saves exist: other paths are 404 and nothing is stored', async () => {
+  for (const p of ['other/doc', 'tracker', 'tracker/list/extra', 'tracker/List', 'tracker/saves/extra', 'tracker/Saves', '../tracker/list', '']) {
     const url = `https://site.test/api/db/${p}`;
     assert.equal((await get(url)).status, 404, `GET ${p}`);
     assert.equal((await put(LIST, url)).status, 404, `PUT ${p}`);
@@ -54,6 +54,18 @@ test('only tracker/list exists: other paths are 404 and nothing is stored', asyn
   assert.equal((await handle(new Request('https://site.test/elsewhere'))).status, 404);
   const [{ n }] = await db.sql`SELECT count(*)::int AS n FROM docs`;
   assert.equal(n, 0);
+});
+
+test('tracker/saves (the CSV log the save button adds to) is its own document, apart from the list', async () => {
+  const SAVES = 'https://site.test/api/db/tracker/saves';
+  assert.deepEqual(await (await get(SAVES)).json(), { data: null });
+  const log = { v: 1, csv: 'Saved,Status\n2026-10-05 14:03:09,Done\n' };
+  assert.equal((await put(log, SAVES)).status, 200);
+  assert.equal((await put(LIST)).status, 200);
+  assert.deepEqual((await (await get(SAVES)).json()).data, log);
+  assert.deepEqual((await (await get()).json()).data, LIST);
+  const [{ n }] = await db.sql`SELECT count(*)::int AS n FROM docs`;
+  assert.equal(n, 2);
 });
 
 test('other methods are 405 and name the allowed ones', async () => {

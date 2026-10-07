@@ -299,3 +299,28 @@ test('with no share sheet or clipboard, share saves the picture as a PNG downloa
     assert.deepEqual(errors, []);
   });
 });
+
+test('save: each click adds the list to the log in the database and downloads the whole log as a CSV', async () => {
+  await seed([R('a', 'Read ch. 4', 45, { subject: 'Biology' }), R('b', 'Essay', 90)]);
+  const HEAD = 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End\n';
+  const logged = async () => (await db.sql`SELECT data FROM docs WHERE path = 'tracker/saves'`)[0]?.data;
+  const save = async (page) => {
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('#save')]);
+    assert.equal(download.suggestedFilename(), 'assignment-saves.csv');
+    return readFileSync(await download.path());
+  };
+  await withSite({}, async (page, errors) => {
+    const one = await save(page);
+    assert.deepEqual([...one.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'a UTF-8 byte order mark first');
+    const first = one.subarray(3).toString('utf8');
+    assert.match(first, new RegExp('^' + HEAD + '\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d,Not started,Read ch. 4,Biology,,,45,,\\n\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d,Not started,Essay,,,,90,,\\n$'));
+    assert.deepEqual(await logged(), { v: 1, csv: first }, 'the database holds exactly the file');
+    await page.waitForTimeout(2400); // the check icon goes back to the disk
+    const two = (await save(page)).subarray(3).toString('utf8');
+    assert.ok(two.startsWith(first), 'the second file keeps the first save and adds to the bottom');
+    assert.equal(two.split('\n').length, 6, 'header, two saves of two rows, and the empty piece after the last newline');
+    assert.deepEqual(await logged(), { v: 1, csv: two });
+    assert.equal(await page.evaluate(() => { const t = document.querySelector('#tip'); return t.classList.contains('show') ? t.textContent : null; }), 'Saved');
+    assert.deepEqual(errors, [], 'nothing blocked by the site CSP');
+  });
+});

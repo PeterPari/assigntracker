@@ -20,6 +20,7 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 | Due date | Optional column, off by default, between subject and type. A date input; clearing it removes the date. Stored as `YYYY-MM-DD`. |
 | Reload | Circular-arrow icon at the right end of the header. Reloads the page, which reads the shared list again, so changes made on another device show up. A save still waiting is sent first. |
 | Clear | Trash icon, bottom-right. First click arms it (red), second click clears the list for every viewer. |
+| Save | Floppy-disk icon, left of the trash. Adds the list to the bottom of one shared save log, then downloads the whole log as `assignment-saves.csv`: every earlier save, then this one. It does not change the list. Greyed out until a row is finished. The result shows as a tooltip on the button, which turns into a check for about two seconds. |
 | Progress | Thick bar at the top with the percentage inside: `½ (done rows ÷ rows + done minutes ÷ total minutes)`. In-progress rows count as 0. |
 | Times | Clock toggle in the menu, off by default. Off: no start or end time is visible anywhere. On: each row shows a 12-hour start and an end (start + duration). An end past midnight is plain clock time (`1:15 AM`). Entered starts persist through off and on. |
 | Chaining | Link toggle in the menu, on by default, shown while times are on. On: only the first row's start is entered, every lower start is the previous end, and with no first start every start and end is blank. Editing the start of a row that follows the row above asks first, with two choices and a cancel: scissors ("Cut and continue") keeps chaining on, gives that row the new start and lets the rows after it continue from it; the broken-link icon ("Disable chaining") turns chaining off. Esc or a click elsewhere cancels. Off: every row uses only its own entered start, and a row with no start has a blank end. Turning chaining on again discards every lower row's own start, including cuts. |
@@ -54,10 +55,17 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 - Closing the share sheet or declining the save confirmation is not an error and shows nothing. A busy confirmation says `Try again in a moment`; a dead end says `Could not share`, and the button works again afterwards.
 - Keyboard focus starts on the × (not the share button), so the Enter that finished the last row cannot share anything. Tab cycles between the two buttons.
 - A small warning icon appears in the header only when the list could not be saved or loaded (no database, view-only access, or a failed write).
+- A web page cannot add to a file on your disk, so the "same file" is the save log kept in the shared database next to the list. Each Save appends to it and downloads a fresh copy of the whole log. Your browser may name repeats `assignment-saves (1).csv`; the newest download is the complete one.
+- A save is one line per finished row, with the columns `Saved, Status, Assignment, Subject, Due, Type, Minutes, Start, End`. `Saved` is the local date and time of the click, the same on every line of one save, which is what tells saves apart. The header is written once, when the log is empty. There are no blank lines between saves, so the file stays a plain table.
+- A save holds everything about the row whatever the menu shows: subject, due date and type are saved even while their columns are hidden, and Start and End are the times the page works out (chained times included), blank when a row has none. `Minutes` is a number, so it can be summed.
+- Unfinished rows (no name or no duration) are left out of a save, as they are left out of the list. Saving the list twice with no change adds it twice.
+- A text cell that starts with `=`, `+`, `-` or `@` is saved with a leading `'`, so a spreadsheet shows it instead of running it as a formula. Cells with a comma, quote or line break are quoted. The file starts with a UTF-8 byte order mark so Excel reads accents correctly.
+- If the log cannot be read, nothing is written over it. If it can be updated but the download is declined or unavailable, the save stays in the log and the tooltip says `Saved, file not downloaded`; pressing Save again adds the list again.
+- The log is one document, up to 256 KB (the limit on every document), which is roughly a hundred saves of a thirty-row list. When it is full, Save says `Could not save` and changes nothing. The latest download still has everything saved before.
 
 ## Data
 
-One document, `tracker/list`, in the artifact database (as an Artifact) or in the `docs` table of Netlify Database (on Netlify):
+Two documents in the artifact database (as an Artifact) or in the `docs` table of Netlify Database (on Netlify). `tracker/list` is the list:
 
 ```json
 {
@@ -77,6 +85,14 @@ One document, `tracker/list`, in the artifact database (as an Artifact) or in th
 - The list is read once when the page opens. There is no live sync: the latest write wins, and a viewer sees other people's changes after reopening the page.
 - Writes are debounced, sent one at a time, and skipped when nothing changed. If the list could not be read, the page never writes over it. Edits made before the list arrives are merged in.
 
+`tracker/saves` is the save log behind the Save button. It is read and written only when Save is clicked, never when the page opens:
+
+```json
+{ "v": 1, "csv": "Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End\n2026-10-05 14:03:09,Done,Essay draft,English,2026-10-14,,150,9:00 AM,11:30 AM\n" }
+```
+
+`csv` is the whole file, and a save only ever adds lines to its end.
+
 ## Drag and drop
 
 Vanilla Pointer Events, no library. The list is small and uniform, so about 60 lines cover it: no download, nothing blocked by the artifact CSP, and full control over the click-versus-drag line so inline editing keeps working. Rows slide aside while you drag, the page scrolls near the window edge, and the drop animates with FLIP.
@@ -91,7 +107,7 @@ scripts/netlify-db-shim.js  gives the page `claude.use('db')` and `claude.use('d
 scripts/make-icons.mjs      draws the app icons into public/ (`npm run icons`)
 public/                     copied into dist/ as is: manifest.webmanifest, apple-touch-icon.png, icons/*.png
 netlify/functions/db.mjs    Netlify Function for /api/db/*
-netlify/lib/docs-api.mjs    the handler behind it (GET/PUT one JSON document), shared with the tests
+netlify/lib/docs-api.mjs    the handler behind it (GET/PUT the list and the save log), shared with the tests
 netlify/edge-functions/auth.mjs  Netlify Edge Function in front of every path: the site password
 netlify/lib/auth.mjs        the Basic Auth check behind it, shared with the tests
 netlify/database/migrations/  SQL migrations for Netlify Database
@@ -134,8 +150,8 @@ Things to know:
 
 `index.html` is an Artifact fragment (no `<html>`, no `<head>`) and its list lives in the Artifact runtime's database. For Netlify, `index.html` stays as it is and the build adds what is missing:
 
-1. `npm run build` (`scripts/build.mjs`) writes `dist/index.html`: a full HTML page with the title and styles in `<head>`, plus `scripts/netlify-db-shim.js`, which provides the same `claude.use('db')` and `claude.use('downloads')` the page already calls. The shim stores the list through `GET`/`PUT /api/db/tracker/list`; "download" is an ordinary browser download.
-2. `netlify/functions/db.mjs` answers `/api/db/*` and keeps the document in the `docs` table of [Netlify Database](https://docs.netlify.com/build/data-and-storage/netlify-database/) (managed Postgres). Only the `tracker/list` document is accepted, up to 256 KB.
+1. `npm run build` (`scripts/build.mjs`) writes `dist/index.html`: a full HTML page with the title and styles in `<head>`, plus `scripts/netlify-db-shim.js`, which provides the same `claude.use('db')` and `claude.use('downloads')` the page already calls. The shim stores the list through `GET`/`PUT /api/db/tracker/list` and the save log through `/api/db/tracker/saves`; "download" is an ordinary browser download.
+2. `netlify/functions/db.mjs` answers `/api/db/*` and keeps the document in the `docs` table of [Netlify Database](https://docs.netlify.com/build/data-and-storage/netlify-database/) (managed Postgres). Only the `tracker/list` and `tracker/saves` documents are accepted, up to 256 KB each.
 3. `netlify/database/migrations/` creates the table. Netlify applies migrations automatically before every production deploy and deploy preview. Each deploy preview gets its own database branch seeded from production, so previews never touch the live list.
 4. `netlify/edge-functions/auth.mjs` puts the site behind one shared password, so Netlify's own site password (a Pro plan feature) is not needed. It runs before everything else, so it guards the page and `/api/db/*` alike (only the manifest and the app icons are left open, see [Install as an app](#install-as-an-app-mac)). The browser asks for the password once with its own login box (HTTP Basic Auth); the username is ignored, so anything works. The password is the `SITE_PASSWORD` environment variable, never part of the repository.
 
@@ -149,8 +165,8 @@ Things to know:
 
 - There are no accounts, only the one shared password. Anyone who has it can read, edit and clear the list, just as a shared Artifact lets everyone write. The Claude Artifact copy is not on Netlify, so the password does not apply to it.
 - Sync works as before: the list is read once when the page opens and the latest write wins. A save that fails shows the warning icon, and a list that could not be read is never overwritten.
-- On Netlify the share button tries the share sheet, then the clipboard, then saves a PNG; the save is a plain download with no confirmation step.
+- On Netlify the share button tries the share sheet, then the clipboard, then saves a PNG; the save is a plain download with no confirmation step. The save button's CSV is the same kind of plain download.
 
 ## Publish as a Claude Artifact
 
-Publish `index.html` as a Claude Artifact with the `db` and `downloads` capabilities (`capabilities: { db: {}, downloads: true }`). `downloads` is how the share button saves a picture when the clipboard refuses. Anyone who can write shared data (Contributor and up) can edit the list; view-only viewers see the list and the warning icon if they try.
+Publish `index.html` as a Claude Artifact with the `db` and `downloads` capabilities (`capabilities: { db: {}, downloads: true }`). `downloads` is how the share button saves a picture when the clipboard refuses, and how the save button hands over its CSV (each one asks the viewer to confirm). Anyone who can write shared data (Contributor and up) can edit the list; view-only viewers see the list and the warning icon if they try.

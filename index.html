@@ -1,6 +1,6 @@
 <title>Assignment Tracker</title>
 <style>
-/* Layout: one full-width column. Progress bar and toggles on top, compact 32px rows, a slim add bar under the list, trash pinned bottom-right. Dark only. */
+/* Layout: one full-width column. Progress bar and toggles on top, compact 32px rows, a slim add bar under the list, save and trash pinned bottom-right. Dark only. */
 :root {
   color-scheme: dark;
   --bg: #13151a;
@@ -150,10 +150,14 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 /* add + clear */
 .add { display: flex; align-items: center; justify-content: center; width: 100%; height: 30px; margin-top: 6px; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--muted); }
 .add:hover { color: var(--text); background: var(--row-hover); }
-.clr { position: fixed; right: 12px; bottom: 12px; z-index: 5; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--raised); box-shadow: 0 0 0 1px var(--line-2); }
-.clr:hover { color: var(--text); }
+.clr, .sav { position: fixed; bottom: 12px; z-index: 5; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--raised); box-shadow: 0 0 0 1px var(--line-2); }
+.clr { right: 12px; }
+.sav { right: 54px; }
+.clr:hover, .sav:hover { color: var(--text); }
 .clr.armed { color: #fff; background: var(--danger-bg); box-shadow: none; }
-.clr:disabled { opacity: .35; cursor: default; }
+.sav.ok { color: var(--st-done); }
+.sav.bad { color: var(--st-prog); }
+.clr:disabled, .sav:disabled { opacity: .35; cursor: default; }
 
 /* all-done popup */
 .ov { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgba(8, 9, 12, .62); animation: ovin .16s ease; }
@@ -194,6 +198,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
   <div id="list"></div>
   <button class="add" id="add" type="button" data-tip="Add" aria-label="Add"></button>
 </div>
+<button class="sav" id="save" type="button" aria-label="Save"></button>
+<span class="sr" id="saveStatus" role="status" aria-live="polite"></span>
 <button class="clr" id="clear" type="button" aria-label="Clear"></button>
 <div class="ov" id="done" role="dialog" aria-modal="true" aria-labelledby="doneMsg" hidden>
   <div class="dlg">
@@ -336,6 +342,8 @@ function validDue(s) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s ? s : null;
 }
 
+const STATUS_TIP = ['Not started', 'In progress', 'Done'];
+
 /** What goes into the shared database: finished rows only. */
 function serialize(s) {
   const rows = s.rows.filter(isComplete).map((r) => ({
@@ -371,6 +379,29 @@ function hydrate(d) {
   const chain = !d || d.chain !== false;
   return { rows, times: !!d && d.times === true, chain, cols: colsOf(d && d.cols) };
 }
+
+/** One CSV cell: quoted when it holds a comma, quote or line break. Text that starts with = + - @ gets a leading ' so a spreadsheet shows it instead of running it as a formula. */
+function csvCell(v) {
+  let s = String(v);
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+/** A date as local "2026-10-05 14:03:09": the stamp on every line of a save. */
+const stamp = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+
+/** The first line of the save file. */
+const SAVE_HEADER = 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End\n';
+
+/** One save as CSV lines, to go under the ones already in the file: a line per finished assignment, all of its columns
+ *  whatever the menu shows, each stamped with `at`. Empty when there is nothing finished to save. */
+function saveLines(s, at) {
+  const { rows, chain } = serialize(s), sch = schedule(rows, chain);
+  return rows.map((r, i) => [
+    at, STATUS_TIP[r.status], r.name, r.subject, r.due || '', r.type, r.mins,
+    sch[i].start == null ? '' : fmtClock(sch[i].start), sch[i].end == null ? '' : fmtClock(sch[i].end),
+  ].map(csvCell).join(',') + '\n').join('');
+}
 /* </logic> */
 
 (() => {
@@ -384,6 +415,7 @@ function hydrate(d) {
     plus: '<path d="M12 5v14M5 12h14"/>',
     x: '<path d="M6 6l12 12M18 6L6 18"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
+    save: '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
     unlink: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/><path d="M4 4l16 16"/>',
@@ -404,8 +436,6 @@ function hydrate(d) {
     '<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><circle cx="9" cy="9" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 2.4a6.6 6.6 0 0 1 0 13.2z" fill="currentColor"/></svg>',
     '<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><circle cx="9" cy="9" r="7.5" fill="currentColor"/></svg>',
   ];
-  const STATUS_TIP = ['Not started', 'In progress', 'Done'];
-
   /* ---------- state ---------- */
   const state = { rows: [], times: false, chain: true, cols: colsOf() };
   let pending = null;       // {id, value}: a lower-row start waiting on the chaining warning
@@ -416,7 +446,7 @@ function hydrate(d) {
   const indexOf = (id) => state.rows.findIndex((r) => r.id === id);
 
   const list = $('#list'), bar = $('#bar'), fill = $('#fill'), pctEl = $('#pct');
-  const tTimes = $('#times'), tChain = $('#chain'), tWarn = $('#warn'), addBtn = $('#add'), clr = $('#clear');
+  const tTimes = $('#times'), tChain = $('#chain'), tWarn = $('#warn'), addBtn = $('#add'), clr = $('#clear'), sav = $('#save'), saveLive = $('#saveStatus');
   addBtn.innerHTML = icon('plus', 18);
   tWarn.innerHTML = icon('alert', 17);
   $('#reload').innerHTML = icon('reload', 17);
@@ -543,6 +573,7 @@ function hydrate(d) {
     tChain.dataset.tip = state.chain ? 'Chaining on' : 'Chaining off';
     tChain.setAttribute('aria-label', tChain.dataset.tip);
     clr.disabled = !state.rows.length;
+    sav.disabled = !state.rows.some(isComplete);
   }
 
   function commit() { touched = true; render(); queueSave(); }
@@ -1041,6 +1072,67 @@ function hydrate(d) {
     pending = null;
     state.rows = [];
     commit();
+  });
+
+  /* ---------- save ---------- */
+  const SAVES_DOC = 'tracker/saves', SAVES_FILE = 'assignment-saves.csv';
+  const SAVE_MSG = { saved: 'Saved', logged: 'Saved, file not downloaded', fail: 'Could not save' };
+  let saveBusy = false, saveFlash = 0;
+  function setSave(tip, iconName, cls) {
+    sav.dataset.tip = tip;
+    sav.setAttribute('aria-label', tip);
+    sav.innerHTML = icon(iconName, 17);
+    sav.classList.toggle('ok', cls === 'ok');
+    sav.classList.toggle('bad', cls === 'bad');
+  }
+  setSave('Save', 'save', '');
+  function resetSave() {
+    clearTimeout(saveFlash);
+    saveLive.textContent = '';
+    setSave('Save', 'save', '');
+    if (tipTarget === sav) hideTip();
+  }
+  /** The result shows as a tooltip right on the button, and the icon turns into a check (or a warning) for a moment. */
+  function flashSave(kind) {
+    const msg = SAVE_MSG[kind];
+    if (!msg) return;
+    setSave(msg, kind === 'saved' ? 'check' : 'alert', kind === 'saved' ? 'ok' : 'bad');
+    saveLive.textContent = msg;
+    tipTarget = sav;
+    showTip(sav);
+    clearTimeout(saveFlash);
+    saveFlash = setTimeout(resetSave, 2200);
+  }
+
+  /** Adds the list under the saves already kept in the shared database, then offers the whole file as a download.
+   *  Resolves to saved | logged (kept, but no file went out) | fail, or null when there is nothing finished to save. */
+  async function saveList() {
+    const lines = saveLines(state, stamp(new Date())); // the list as it is now, whatever happens while the database answers
+    if (!lines) return null;
+    let csv;
+    try {
+      const db = window.claude && window.claude.use ? await window.claude.use('db') : null;
+      if (!db) return 'fail';
+      const log = db.doc(SAVES_DOC);
+      let snap = null;
+      for (let a = 0; a < 2 && !snap; a++) {
+        try { snap = await log.get(); } catch (err) { if (a === 0 && err && err.code === 'unavailable') await sleep(600); else break; }
+      }
+      if (!snap) return 'fail'; // never write over a log that could not be read
+      const old = snap.exists ? snap.data() : null;
+      csv = ((old && typeof old.csv === 'string' && old.csv) || SAVE_HEADER) + lines;
+      await log.set({ v: 1, csv });
+    } catch (_) { return 'fail'; }
+    try {
+      const dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null;
+      if (dl) { await dl.save({ filename: SAVES_FILE, data: new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }) }); return 'saved'; } // the BOM lets Excel read accents
+    } catch (_) { /* declined or refused: the log has it anyway */ }
+    return 'logged';
+  }
+  sav.addEventListener('click', async () => {
+    if (saveBusy) return;
+    saveBusy = true;
+    try { flashSave(await saveList()); } finally { saveBusy = false; }
   });
 
   document.addEventListener('pointerdown', (e) => {
