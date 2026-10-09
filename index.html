@@ -176,8 +176,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .clr.armed { color: #fff; background: var(--danger-bg); box-shadow: none; }
 .sav.ok { color: var(--st-done); }
 .sav.bad { color: var(--st-prog); }
-.clr:disabled, .sav.off { opacity: .35; cursor: default; }
-.sav.off:hover { color: var(--muted); }
+.clr:disabled, .sav.off:not(.dl) { opacity: .35; cursor: default; } /* .dl: Shift is held, the button downloads and is never greyed */
+.sav.off:not(.dl):hover { color: var(--muted); }
 
 /* "save these again?" popup, just above the save button; the rows it asks about are highlighted */
 .ag { position: fixed; right: 12px; bottom: 54px; z-index: 6; display: flex; align-items: center; gap: 2px; padding: 3px 3px 3px 10px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); white-space: nowrap; }
@@ -514,6 +514,7 @@ function savesCsv(saves) {
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
     share: '<path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
+    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
     book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>',
     calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
@@ -667,7 +668,7 @@ function savesCsv(saves) {
     clr.disabled = !state.rows.length;
     const nothing = !state.rows.some(isComplete); // greyed, but not disabled: Shift-click still downloads
     sav.classList.toggle('off', nothing);
-    sav.setAttribute('aria-disabled', String(nothing));
+    paintSaveDisabled();
   }
 
   function commit() { touched = true; render(); queueSave(); }
@@ -1170,7 +1171,7 @@ function savesCsv(saves) {
 
   /* ---------- save ---------- */
   // Save adds the finished rows to the save history in the shared database: one document per save, under saves/.
-  // Shift-click downloads every save as one CSV file instead. The button does not advertise it.
+  // Shift-click downloads every save as one CSV file instead. While Shift is held the button shows a download arrow to say so.
   const SAVES = 'saves', PAGE = 500;
   const SAVE_MSG = { saved: 'Saved', none: 'Nothing new to save', fail: 'Could not save', downloaded: 'Downloaded', empty: 'Nothing saved yet', dlfail: 'Could not download' };
   const SAVE_LOOK = { saved: 'ok', downloaded: 'ok', fail: 'bad', dlfail: 'bad' }; // the rest only say something
@@ -1187,10 +1188,33 @@ function savesCsv(saves) {
     sav.classList.toggle('bad', cls === 'bad');
   }
   setSave('Save', 'save', '');
+
+  /* Holding Shift outside a text box turns the button into the download button a Shift-click makes it. Typing capitals in a text
+     box leaves it alone, unless the pointer is on the button: the Shift-mousedown below keeps the focus in the text box. */
+  let shiftHeld = false, overSave = false, flashing = false; // flashing: a result is showing, which Shift never replaces
+  const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable); };
+  const wantsDownload = () => shiftHeld && (overSave || !typing());
+  /** Greyed (nothing to save) unless it is the download button, which works with an empty list. */
+  function paintSaveDisabled() {
+    sav.setAttribute('aria-disabled', String(sav.classList.contains('off') && !sav.classList.contains('dl')));
+  }
+  /** The button at rest: the floppy disk, or the download arrow while Shift is held. */
+  function restSave() {
+    const dl = wantsDownload();
+    setSave(dl ? 'Download saves' : 'Save', dl ? 'download' : 'save', '');
+    sav.classList.toggle('dl', dl);
+    paintSaveDisabled();
+  }
+  function syncSave() {
+    if (flashing || wantsDownload() === sav.classList.contains('dl')) return;
+    restSave();
+    if (tipTarget === sav) hideTip(); // its text is from the other look
+  }
   function resetSave() {
+    flashing = false;
     clearTimeout(saveFlash);
     saveLive.textContent = '';
-    setSave('Save', 'save', '');
+    restSave();
     if (tipTarget === sav) hideTip();
   }
   /** The result shows as a tooltip right on the button, and the icon turns into a check (or a warning) for a moment. */
@@ -1198,6 +1222,7 @@ function savesCsv(saves) {
     const msg = SAVE_MSG[kind];
     if (!msg) return;
     const look = SAVE_LOOK[kind] || '';
+    flashing = true;
     setSave(msg, look === 'ok' ? 'check' : look === 'bad' ? 'alert' : 'save', look);
     saveLive.textContent = msg;
     tipTarget = sav;
@@ -1305,6 +1330,15 @@ function savesCsv(saves) {
     saveBusy = true;
     try { flashSave(await (e.shiftKey ? downloadSaves() : saveList())); } finally { saveBusy = false; }
   });
+
+  const watchShift = (e) => { shiftHeld = e.shiftKey; syncSave(); };
+  document.addEventListener('keydown', watchShift, true);
+  document.addEventListener('keyup', watchShift, true);
+  window.addEventListener('blur', () => { shiftHeld = false; syncSave(); }); // Shift let go while another window had the keyboard: no keyup comes
+  document.addEventListener('focusin', syncSave);
+  document.addEventListener('focusout', () => setTimeout(syncSave, 0)); // once the focus has settled on its new element
+  sav.addEventListener('pointerenter', () => { overSave = true; syncSave(); });
+  sav.addEventListener('pointerleave', () => { overSave = false; syncSave(); });
 
   document.addEventListener('pointerdown', (e) => {
     if (pending && !e.target.closest('.pop')) cancelPending();
