@@ -728,6 +728,96 @@ test('save: a declined download shows nothing and the button works again', async
   });
 });
 
+// While Shift is held outside a text box the save icon is a download arrow ('M12 15V3' is in its path), and the button is never greyed.
+const dlLook = (page) => page.$eval('#save', (b) => ({
+  arrow: b.innerHTML.includes('M12 15V3'), check: b.innerHTML.includes('M8 12.5l3 3 5-6'),
+  tip: b.dataset.tip, label: b.getAttribute('aria-label'),
+  grey: [b.classList.contains('off'), b.getAttribute('aria-disabled'), getComputedStyle(b).opacity],
+}));
+const SAVE_LOOK = { arrow: false, check: false, tip: 'Save', label: 'Save' };
+const DL_LOOK = { arrow: true, check: false, tip: 'Download saves', label: 'Download saves' };
+const dlIcon = async (page) => { const { grey, ...rest } = await dlLook(page); return rest; };
+
+test('save: holding Shift turns the icon into a download arrow, letting go turns it back', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
+    const floppy = await page.$eval('#save', (b) => b.innerHTML);
+    assert.deepEqual(await dlIcon(page), SAVE_LOOK);
+    await page.keyboard.down('Shift');
+    assert.deepEqual(await dlIcon(page), DL_LOOK);
+    await page.keyboard.up('Shift');
+    assert.deepEqual(await dlIcon(page), SAVE_LOOK);
+    assert.equal(await page.$eval('#save', (b) => b.innerHTML), floppy, 'the same floppy disk comes back');
+    assert.equal(await downloads(page), 0, 'only the icon changed');
+  });
+});
+
+test('save: the download arrow is not greyed with an empty list, the floppy disk is', async () => {
+  await withPage({}, async (page) => {
+    assert.deepEqual((await dlLook(page)).grey, [true, 'true', '0.35']);
+    await page.keyboard.down('Shift');
+    assert.deepEqual((await dlLook(page)).grey, [true, 'false', '1'], 'Shift-click works with an empty list, so it does not look disabled');
+    await page.keyboard.up('Shift');
+    assert.deepEqual((await dlLook(page)).grey, [true, 'true', '0.35']);
+  });
+});
+
+test('save: Shift in a text box leaves the icon alone, unless the pointer is on the button', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
+    await page.click('.row .nm');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('x'); // a capital
+    assert.deepEqual(await dlIcon(page), SAVE_LOOK, 'typing capitals');
+    await page.hover('#save');
+    assert.deepEqual(await dlIcon(page), DL_LOOK, 'Shift with the pointer on the button: a click would download');
+    await page.mouse.move(2, 2);
+    assert.deepEqual(await dlIcon(page), SAVE_LOOK, 'pointer gone, still typing');
+    await page.keyboard.up('Shift');
+    await page.keyboard.press('Escape');
+    await page.keyboard.down('Shift');
+    assert.equal(await page.evaluate(() => /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)), false);
+    assert.deepEqual(await dlIcon(page), DL_LOOK, 'not typing any more');
+    await page.keyboard.up('Shift');
+    assert.deepEqual(await dlIcon(page), SAVE_LOOK);
+  });
+});
+
+test('save: Shift held while the focus leaves a text box turns the icon into the arrow', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
+    await page.click('.row .nm');
+    await page.keyboard.down('Shift');
+    assert.deepEqual(await dlIcon(page), SAVE_LOOK);
+    await page.keyboard.press('Tab'); // Shift+Tab, backwards out of the name
+    assert.equal(await page.evaluate(() => /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)), false);
+    assert.deepEqual(await dlIcon(page), DL_LOOK);
+    await page.keyboard.up('Shift');
+    assert.deepEqual(await dlIcon(page), SAVE_LOOK);
+  });
+});
+
+test('save: losing the window while Shift is held brings the floppy disk back', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
+    await page.keyboard.down('Shift');
+    assert.deepEqual(await dlIcon(page), DL_LOOK);
+    await page.evaluate(() => window.dispatchEvent(new Event('blur'))); // Shift is let go over another window: no keyup arrives
+    assert.deepEqual(await dlIcon(page), SAVE_LOOK);
+    await page.keyboard.up('Shift');
+  });
+});
+
+test('save: a result is never replaced by the arrow, and the icon then follows the Shift key', async () => {
+  await withPage({ initial: { ...doc([R('x', 'Tonight', 30)]), ...history }, now: [23, 0] }, async (page) => {
+    await shiftSave(page);
+    assert.deepEqual(await dlIcon(page), { arrow: false, check: true, tip: 'Downloaded', label: 'Downloaded' });
+    await page.keyboard.down('Shift');
+    assert.equal((await dlLook(page)).tip, 'Downloaded', 'Shift while the result shows');
+    assert.equal((await dlLook(page)).arrow, false);
+    await page.waitForTimeout(2400);
+    assert.deepEqual(await dlIcon(page), DL_LOOK, 'Shift is still down when the result goes');
+    await page.keyboard.up('Shift');
+    assert.deepEqual(await dlIcon(page), SAVE_LOOK);
+  });
+});
+
 test('save: a history that cannot be read writes nothing, a failed write says so, and the button works again', async () => {
   await withPage({ initial: doc([R('a', 'One', 30)]) }, async (page) => {
     await page.evaluate(() => { window.__db.failQuery = 'failed'; });
