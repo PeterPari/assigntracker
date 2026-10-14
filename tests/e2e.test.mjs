@@ -2129,7 +2129,9 @@ const rowTip = (page, n = 1) => page.getAttribute(`.row:nth-child(${n}) .st`, 'd
 
 test('subtasks: a caret beside the x on hover opens the subtasks; Enter adds the next, Enter on an empty one ends', async () => {
   await withPage({ initial: doc([R('a', 'Essay', 60), R('b', 'Other', 30)]) }, async (page) => {
-    assert.equal(await page.$eval('.row:nth-child(1) .rm', (e) => e.previousElementSibling.className), 'ex', 'the caret sits right before the x');
+    assert.equal(await page.$eval('.row:nth-child(1) .ln', (e) => e.lastElementChild.className), 'ex', 'the caret ends the task line');
+    const [exBox, rmBox] = [await page.locator('.row:nth-child(1) .ex').boundingBox(), await page.locator('.row:nth-child(1) .rm').boundingBox()];
+    assert.ok(rmBox.x > exBox.x && rmBox.x - (exBox.x + exBox.width) < 12, 'the x comes right after the caret');
     assert.equal(await opacity(page, '.row:nth-child(1) .ex'), '0', 'hidden until hover');
     await page.hover('.row:nth-child(1) .nm');
     assert.equal(await opacity(page, '.row:nth-child(1) .ex'), '1');
@@ -2167,6 +2169,10 @@ test('subtasks: a caret beside the x on hover opens the subtasks; Enter adds the
     await page.keyboard.type('Sources');
     await page.keyboard.press('Tab');
     assert.deepEqual(await subNames(page), ['Outline', 'Sources', 'Draft']);
+    await page.mouse.move(1000, 690); // off the task: the + hides
+    assert.equal(await opacity(page, '.row:nth-child(1) .sadd'), '0');
+    await page.hover('.row:nth-child(1) .nm');
+    assert.equal(await opacity(page, '.row:nth-child(1) .sadd'), '1', 'the + shows while the task is hovered');
     await page.click('.row:nth-child(1) .sadd');
     await page.keyboard.type('Proofread');
     await page.keyboard.press('Enter');
@@ -2189,7 +2195,9 @@ test('subtasks: a named subtask keeps its name, Esc undoes an edit, the x delete
     assert.equal(await opacity(page, '.sub:nth-child(1) .srm'), '0');
     await page.hover('.sub:nth-child(1) .snm');
     assert.equal(await opacity(page, '.sub:nth-child(1) .srm'), '1');
-    assert.equal(await opacity(page, '.row .ln .rm'), '0', 'hovering a subtask does not show the task x');
+    assert.equal(await opacity(page, '.row > .rm'), '1', 'the task x shows while anywhere on the task is hovered');
+    const [row, rm] = [await page.locator('.row').boundingBox(), await page.locator('.row > .rm').boundingBox()];
+    assert.ok(rm.height > 70 && Math.abs(row.y + row.height / 2 - (rm.y + rm.height / 2)) < 1, 'the x box spans the task and its subtasks');
     await page.click('.sub:nth-child(1) .srm');
     assert.deepEqual(await subNames(page), ['Draft']);
     await settle(page);
