@@ -1,6 +1,6 @@
 # Assignment Tracker
 
-A one-page assignment tracker with a shared list, a progress bar, optional start and end times, optional subject, due date and assignment type columns, and drag to reorder. It is a single self-contained HTML file (`index.html`), published as a Claude Artifact or deployed on Netlify (see [Deploy on Netlify](#deploy-on-netlify)). Dark theme, system sans-serif, desktop only.
+A one-page assignment tracker with a shared list, a progress bar, subtasks, optional start and end times, optional subject, due date and assignment type columns, and drag to reorder. It is a single self-contained HTML file (`index.html`), published as a Claude Artifact or deployed on Netlify (see [Deploy on Netlify](#deploy-on-netlify)). Dark theme, system sans-serif, desktop only.
 
 The page shows no words. Everything is an icon (the menu included) except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, tooltips, the one message in the all-done popup, the picture that popup shares, and the question in the save popup. Tooltips appear after a long hover (800 ms).
 
@@ -14,7 +14,10 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 | Duration | Click to edit inline. Hours and minutes fields both show while editing. After commit the empty unit disappears: `30 min`, `1 hr`, `2 hrs`, `2 hrs 30 min`. Stored as total minutes. |
 | Add | `+` under the list adds a row at the bottom. A row needs both a name and a duration. |
 | Delete | `×` appears when you hover a row. |
-| Reorder | Drag any row, including from its name or status icon. |
+| Subtasks | A down caret appears beside the `×` when you hover a task. Click it to open the task's subtasks under it; a task with none opens with an empty subtask ready to type. A subtask is a status (○ ◐ ●, click cycles) and a name (placeholder `Subtask`). Enter adds the next subtask right below; Enter on an empty one ends the list. The small `+` under the subtasks adds one at the end, and `×` on hover deletes one. Drag a subtask to reorder it inside its task. |
+| Subtasks and the task | The subtasks drive their task: starting or finishing one makes a not-started task in progress, finishing the last one makes the task done, and reopening one of a done task puts it back in progress. Marking the task done by hand marks every subtask done; un-marking it leaves them as they are. The progress bar still counts tasks only. |
+| Showing subtasks | A task that is not done and has subtasks always shows them, and has no caret. When the task is done they fold away, and the caret opens them again (and closes them). Which tasks you opened with the caret is remembered on this device only. |
+| Reorder | Drag any row, including from its name or status icon. A task with its subtasks open moves with them. |
 | Menu | Hamburger icon in the header. Opens a small drop-down under it with icon toggles (each has a tooltip): subject (book), due date (calendar), assignment type (tag), then times (clock) and chaining (link). The drop-down stays open while you change several toggles, and closes on a second click on the hamburger, an outside click, Esc (focus returns to the hamburger) or tabbing out. |
 | Subject, Assignment type | Optional columns, off by default, shown right after the name (subject first, type after the due date). Free text, up to 100 characters. While empty they show the grey placeholders `Subject` and `Assignment type`, as the name shows `Assignment`. Click to edit inline; Enter commits, Esc cancels; empty is fine. A row can be dragged by these cells. |
 | Subject banner | A solid 5px strip on the left edge of every row, colored by subject, whether or not the Subject column is showing. It updates when a subject edit commits. The color is worked out from the text (not stored): case and spacing do not matter, and common aliases count. Anything that matches none of the classes, and an empty subject, gets a neutral grey. |
@@ -47,6 +50,10 @@ The page shows no words. Everything is an icon (the menu included) except placeh
 - Turning chaining off keeps only starts that were entered. Computed starts are not copied into the rows.
 - The armed trash disarms after 4 seconds, on any other click, or on Esc.
 - The three column toggles, `Times` and `Chaining` are saved with the list, so every viewer sees the same setup.
+- A subtask with no name yet is a draft: it never counts toward its task, is never stored, and is dropped when its name loses focus empty (or on Esc). One draft per task: `+` or the caret moves to an existing draft instead of adding another. A named subtask can't lose its name; an empty commit restores it.
+- Deleting a subtask counts as a subtask change, so deleting the last open one finishes its task. The all-done popup still opens only from a status click (on a task or a subtask).
+- A subtask status change records times on its task exactly as a status click on the task would (the start when it goes in progress, the end when it becomes done), only while times are shown. A done task that goes back to in progress keeps its start.
+- Subtasks are part of the list, not of the nightly saves: the save history and the CSV are unchanged.
 - Subject, due date and type never decide whether a row is finished (that is still a name and a duration), so an unfinished row, with or without them, is not saved or counted.
 - The all-done total is the sum of the rows' durations. With times shown, a row marked done records start-to-now, so the total is the time really spent; with times hidden it is the planned total.
 - The all-done sentence is fixed: `Peter finished all of his assignments in …`, in the popup, on the picture and in the shared text. One person uses this tracker, so nothing asks for a name.
@@ -95,13 +102,15 @@ Documents in the artifact database (as an Artifact) or in the `docs` table of Ne
   "chain": true,
   "cols": { "subject": true, "due": true, "type": false },
   "rows": [
-    { "id": "lq3k9x2a1b", "name": "Essay draft", "mins": 150, "status": 1, "start": 540, "subject": "English", "due": "2026-10-14", "type": "" }
+    { "id": "lq3k9x2a1b", "name": "Essay draft", "mins": 150, "status": 1, "start": 540, "subject": "English", "due": "2026-10-14", "type": "",
+      "subs": [{ "id": "lq3kb1c9zz", "name": "Outline", "status": 2 }, { "id": "lq3kb2d0yy", "name": "First draft", "status": 1 }] }
   ]
 }
 ```
 
 - `mins` is total minutes. `status` is `0` not started, `1` in progress, `2` done.
 - `cols` says which optional columns show. `subject` and `type` are text (up to 100 characters); `due` is `YYYY-MM-DD` or `null`. Documents saved before these existed have no `cols` and no row fields, and load with every column hidden and empty.
+- `subs` is the row's subtasks in order, each with an `id`, a `name` (up to 200 characters) and a `status` like a row's. A row without subtasks has no `subs`; up to 100 per row are kept. Which tasks are opened with the caret is not here: it is kept in the browser (`localStorage`, key `subsOpen`).
 - `start` is minutes since midnight, or `null`. When `chain` is true a row without a start follows the end of the row above; a row with one cuts the chain there.
 - The list is read once when the page opens. There is no live sync: the latest write wins, and a viewer sees other people's changes after reopening the page.
 - Writes are debounced, sent one at a time, and skipped when nothing changed. If the list could not be read, the page never writes over it. Edits made before the list arrives are merged in.
@@ -125,7 +134,7 @@ Each save is its own document, `saves/<k>`, in the `saves` collection. They are 
 
 ## Drag and drop
 
-Vanilla Pointer Events, no library. The list is small and uniform, so about 60 lines cover it: no download, nothing blocked by the artifact CSP, and full control over the click-versus-drag line so inline editing keeps working. Rows slide aside while you drag, the page scrolls near the window edge, and the drop animates with FLIP.
+Vanilla Pointer Events, no library. The list is small and uniform, so about 60 lines cover it: no download, nothing blocked by the artifact CSP, and full control over the click-versus-drag line so inline editing keeps working. The same code drags tasks and the subtasks inside one task; items may differ in height (a task with its subtasks open is taller), and one passes another once its leading edge reaches the other's middle. Rows slide aside while you drag, the page scrolls near the window edge, and the drop animates with FLIP.
 
 ## Files
 

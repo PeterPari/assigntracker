@@ -1,6 +1,6 @@
 <title>Assignment Tracker</title>
 <style>
-/* Layout: one full-width column. Progress bar and toggles on top, compact 32px rows, a slim add bar under the list, save and trash pinned bottom-right. Dark only. */
+/* Layout: one full-width column. Progress bar and toggles on top, compact 32px rows (subtasks open under a row), a slim add bar under the list, save and trash pinned bottom-right. Dark only. */
 :root {
   color-scheme: dark;
   --bg: #13151a;
@@ -72,11 +72,11 @@ svg { display: block; flex: none; }
 /* rows */
 #list { display: flex; flex-direction: column; gap: 2px; }
 .row {
-  position: relative; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 11px;
-  border-radius: 6px; box-shadow: inset 0 -1px 0 var(--line);
+  position: relative; border-radius: 6px; box-shadow: inset 0 -1px 0 var(--line);
   transition: transform .16s ease, background-color .12s ease;
   user-select: none; -webkit-user-select: none;
 }
+.ln { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 11px; } /* the task's own line; its subtasks open below it */
 /* subject banner: a solid strip on the left edge, colored by class (data-subj); grey when the subject matches none */
 .row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 6px 0 0 6px; background: var(--subj, var(--subj-none)); pointer-events: none; }
 .row[data-subj="math"] { --subj: var(--subj-math); }
@@ -151,9 +151,36 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .ev:not(:disabled):hover { background: var(--raised); }
 .row.ed-end .ev { display: none; }
 
-.rm { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
-.row:hover .rm, .rm:focus-visible { opacity: 1; }
+.rm, .ex { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
+.ln:hover .rm, .rm:focus-visible, .ln:hover .ex, .ex:focus-visible { opacity: 1; }
 .rm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); }
+.ex:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+.ex svg { transition: transform .16s ease; }
+.row.open .ex svg { transform: rotate(180deg); }
+.row.forced .ex { display: none; } /* an unfinished task with subtasks always shows them: nothing to toggle */
+
+/* subtasks: a status and a name per line, indented to the task's name */
+.subs { display: none; padding: 0 4px 5px 41px; }
+.row.open .subs { display: block; }
+.sbl { display: flex; flex-direction: column; }
+.sub { position: relative; display: flex; align-items: center; gap: 4px; height: 26px; border-radius: 5px; transition: transform .16s ease; }
+.sub.drag { transition: none; z-index: 4; background: var(--raised); box-shadow: 0 4px 12px rgba(0, 0, 0, .45); }
+.sst { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 50%; }
+.sst svg { width: 14px; height: 14px; }
+.sst:hover { background: rgba(255, 255, 255, .06); }
+.sub.s0 .sst { color: var(--st-none); }
+.sub.s1 .sst { color: var(--st-prog); }
+.sub.s2 .sst { color: var(--st-done); }
+.snm { flex: 1; min-width: 0; height: 22px; display: flex; align-items: center; padding: 0 6px; border-radius: 5px; cursor: text; }
+.snm:focus-within { background: var(--raised); box-shadow: inset 0 0 0 1px var(--accent); }
+.sni { width: 100%; text-overflow: ellipsis; pointer-events: none; user-select: text; -webkit-user-select: text; }
+.snm:focus-within .sni { pointer-events: auto; }
+.sub.s2 .sni { color: var(--done-text); }
+.srm { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
+.sub:hover .srm, .srm:focus-visible { opacity: 1; }
+.srm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); }
+.sadd { width: 22px; height: 22px; display: grid; place-items: center; margin-top: 2px; border-radius: 5px; color: var(--muted); }
+.sadd:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
 
 /* chaining warning popup, beside the start field */
 .pop { display: none; position: absolute; right: calc(100% + 10px); top: 50%; transform: translateY(-50%); z-index: 6; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
@@ -366,6 +393,34 @@ function removeRow(rows, id, chain) {
   return chain ? keepPlan(next, rows[0]) : next;
 }
 
+/** A subtask counts once it has a name; an unnamed one is a draft still being typed. */
+const namedSubs = (subs) => (Array.isArray(subs) ? subs.filter((s) => s.name.trim() !== '') : []);
+
+/** The parent's status after its subtasks change: all done finishes it, anything started or reopened makes it in progress.
+ *  Without named subtasks, or when nothing calls for a change, it stays as it is. It never goes back to not started. */
+function rollup(status, subs) {
+  const named = namedSubs(subs);
+  if (!named.length) return status;
+  if (named.every((s) => s.status === 2)) return 2;
+  if (status === 2) return 1;
+  if (status === 0 && named.some((s) => s.status > 0)) return 1;
+  return status;
+}
+
+/** Finishing a task by hand finishes every subtask. */
+const finishSubs = (subs) => (subs || []).map((s) => (s.status === 2 ? s : { ...s, status: 2 }));
+
+/** Subtasks show while the task is unfinished and has some, or when opened by hand with the caret. */
+const subsForced = (r) => r.status !== 2 && namedSubs(r.subs).length > 0;
+const subsShown = (r, opened) => subsForced(r) || !!opened;
+
+function moveSub(subs, from, to) {
+  if (from === to || from < 0 || to < 0 || from >= subs.length || to >= subs.length) return subs;
+  const next = subs.slice(), [s] = next.splice(from, 1);
+  next.splice(to, 0, s);
+  return next;
+}
+
 /** The optional columns, in the order they appear in a row and in the menu. */
 const COLS = ['subject', 'due', 'type'];
 const colsOf = (c) => ({ subject: !!c && c.subject === true, due: !!c && c.due === true, type: !!c && c.type === true });
@@ -400,15 +455,32 @@ function validDue(s) {
 
 const STATUS_TIP = ['Not started', 'In progress', 'Done'];
 
-/** What goes into the shared database: finished rows only. */
+/** What goes into the shared database: finished rows only, and named subtasks only (a row without any has no `subs`). */
 function serialize(s) {
-  const rows = s.rows.filter(isComplete).map((r) => ({
-    id: r.id, name: r.name.trim(), mins: r.mins, status: r.status, start: r.start,
-    subject: (r.subject || '').trim(), due: r.due || null, type: (r.type || '').trim(),
-  }));
+  const rows = s.rows.filter(isComplete).map((r) => {
+    const out = {
+      id: r.id, name: r.name.trim(), mins: r.mins, status: r.status, start: r.start,
+      subject: (r.subject || '').trim(), due: r.due || null, type: (r.type || '').trim(),
+    };
+    const subs = namedSubs(r.subs).map((x) => ({ id: x.id, name: x.name.trim(), status: x.status }));
+    if (subs.length) out.subs = subs;
+    return out;
+  });
   const head = s.rows[0]; // an unfinished first row hands its start to the first saved row
   if (s.chain && head && !isComplete(head) && head.start != null && rows.length && rows[0].start == null) rows[0] = { ...rows[0], start: head.start };
   return { v: 1, rows, times: !!s.times, chain: !!s.chain, cols: colsOf(s.cols) };
+}
+
+const MAX_SUBS = 100;
+function cleanSub(x) {
+  if (!x || typeof x.id !== 'string' || x.id === '' || typeof x.name !== 'string') return null;
+  const name = x.name.trim().slice(0, 200);
+  return name ? { id: x.id, name, status: x.status === 1 || x.status === 2 ? x.status : 0 } : null;
+}
+function cleanSubs(subs) {
+  if (!Array.isArray(subs)) return [];
+  const seen = new Set();
+  return subs.map(cleanSub).filter((x) => x && !seen.has(x.id) && seen.add(x.id)).slice(0, MAX_SUBS);
 }
 
 function cleanRow(r) {
@@ -424,6 +496,7 @@ function cleanRow(r) {
     subject: typeof r.subject === 'string' ? r.subject.slice(0, 100) : '',
     due: validDue(r.due),
     type: typeof r.type === 'string' ? r.type.slice(0, 100) : '',
+    subs: cleanSubs(r.subs),
   };
   return isComplete(row) ? row : null;
 }
@@ -520,6 +593,7 @@ function savesCsv(saves) {
     calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
     tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r=".6" fill="currentColor"/>',
     tick: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    chev: '<path d="M6 9l6 6 6-6"/>',
     reload: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
   };
   const icon = (n, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
@@ -534,6 +608,17 @@ function savesCsv(saves) {
   let touched = false;      // local edits before the stored list arrived
   let settingsTouched = false;
   const els = new Map();
+  /* Which tasks had their subtasks opened with the caret: remembered on this device only. */
+  const OPEN_KEY = 'subsOpen';
+  const opened = new Set((() => {
+    try { const v = JSON.parse(localStorage.getItem(OPEN_KEY) || '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; } catch (_) { return []; }
+  })());
+  const storeOpened = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...opened])); } catch (_) { /* this device just won't remember */ } };
+  function setOpened(id, on) {
+    if (on === opened.has(id)) return;
+    if (on) opened.add(id); else opened.delete(id);
+    storeOpened();
+  }
   const rowOf = (id) => state.rows.find((r) => r.id === id);
   const indexOf = (id) => state.rows.findIndex((r) => r.id === id);
 
@@ -553,7 +638,7 @@ function savesCsv(saves) {
   $('#doneShare').innerHTML = icon('share', 16);
 
   /* ---------- rows ---------- */
-  const ROW_HTML = `
+  const ROW_HTML = `<div class="ln">
     <button class="st" type="button"></button>
     <div class="nm"><input class="nmi" type="text" maxlength="200" placeholder="Assignment" autocomplete="off" spellcheck="false" aria-label="Assignment"></div>
     <div class="cs tf" data-tip="Subject"><input class="tfi sbi" type="text" maxlength="100" placeholder="Subject" autocomplete="off" spellcheck="false" aria-label="Subject"></div>
@@ -586,7 +671,14 @@ function savesCsv(saves) {
         </div>
       </div>
     </div>
-    <button class="rm" type="button" data-tip="Delete" aria-label="Delete">${icon('x', 15)}</button>`;
+    <button class="ex" type="button" aria-expanded="false">${icon('chev', 15)}</button>
+    <button class="rm" type="button" data-tip="Delete" aria-label="Delete">${icon('x', 15)}</button>
+    </div>
+    <div class="subs"><div class="sbl"></div><button class="sadd" type="button" data-tip="Add subtask" aria-label="Add subtask">${icon('plus', 13)}</button></div>`;
+  const SUB_HTML = `
+    <button class="sst" type="button"></button>
+    <div class="snm"><input class="sni" type="text" maxlength="200" placeholder="Subtask" autocomplete="off" spellcheck="false" aria-label="Subtask"></div>
+    <button class="srm" type="button" data-tip="Delete subtask" aria-label="Delete subtask">${icon('x', 13)}</button>`;
 
   function makeRow(id) {
     const el = document.createElement('div');
@@ -629,6 +721,38 @@ function savesCsv(saves) {
     evb.textContent = s.end == null ? '' : fmtClock(s.end);
     evb.disabled = !(r.status === 2 && s.end != null); // the end can be corrected once the row is done
     $('.ec', el).classList.toggle('blank', s.end == null);
+    const forced = subsForced(r), open = subsShown(r, opened.has(r.id)), ex = $('.ex', el);
+    el.classList.toggle('open', open);
+    el.classList.toggle('forced', forced);
+    ex.dataset.tip = open ? 'Hide subtasks' : 'Show subtasks';
+    ex.setAttribute('aria-label', ex.dataset.tip);
+    ex.setAttribute('aria-expanded', String(open));
+    renderSubs(el, r.subs || []);
+  }
+
+  /** The subtask lines of a row, kept in step with its subs (one element per subtask id, like the rows themselves). */
+  function renderSubs(el, subs) {
+    const box = $('.sbl', el), map = el._subs || (el._subs = new Map());
+    const ids = new Set(subs.map((x) => x.id));
+    for (const [sid, se] of map) if (!ids.has(sid)) { se.remove(); map.delete(sid); }
+    subs.forEach((x, i) => {
+      let se = map.get(x.id);
+      if (!se) {
+        se = document.createElement('div');
+        se.className = 'sub';
+        se.dataset.sid = x.id;
+        se.innerHTML = SUB_HTML;
+        map.set(x.id, se);
+      }
+      for (const k of [0, 1, 2]) se.classList.toggle('s' + k, x.status === k);
+      const st = $('.sst', se);
+      if (se._st !== x.status) { st.innerHTML = STATUS[x.status]; se._st = x.status; }
+      st.dataset.tip = STATUS_TIP[x.status];
+      st.setAttribute('aria-label', STATUS_TIP[x.status]);
+      const inp = $('.sni', se);
+      if (document.activeElement !== inp) inp.value = x.name;
+      if (box.children[i] !== se) box.insertBefore(se, box.children[i] || null);
+    });
   }
 
   function render() {
@@ -672,7 +796,12 @@ function savesCsv(saves) {
   }
 
   function commit() { touched = true; render(); queueSave(); }
-  function patch(id, p) { state.rows = state.rows.map((r) => (r.id === id ? { ...r, ...p } : r)); commit(); }
+  function patch(id, p) {
+    const old = rowOf(id);
+    if (old && p.status !== undefined && (p.status === 2) !== (old.status === 2)) setOpened(id, false); // finishing a task folds its subtasks away
+    state.rows = state.rows.map((r) => (r.id === id ? { ...r, ...p } : r));
+    commit();
+  }
 
   /* ---------- name ---------- */
   function commitName(el, viaEnter) {
@@ -831,11 +960,11 @@ function savesCsv(saves) {
 
   /* ---------- status ---------- */
   const nowMins = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
-  function statusPatch(r) {
-    const status = (r.status + 1) % 3, p = { status };
-    if (!state.times) return p; // times hidden: nothing time-related is recorded
+  function statusPatchTo(r, status) {
+    const p = { status };
+    if (!state.times || status === r.status) return p; // times hidden: nothing time-related is recorded
     const i = indexOf(r.id);
-    if (status === 1) {
+    if (status === 1 && r.status === 0) {
       // starting now: the start becomes the current time. Chained, this cuts the chain before the row; the rows after it follow its end.
       p.start = nowMins();
     } else if (status === 2) {
@@ -1014,9 +1143,74 @@ function savesCsv(saves) {
   function cycleStatus(id) {
     const r = rowOf(id);
     if (!r) return;
-    const was = allDone(state.rows);
-    patch(id, statusPatch(r));
+    const was = allDone(state.rows), status = (r.status + 1) % 3, p = statusPatchTo(r, status);
+    if (status === 2 && r.subs && r.subs.length) p.subs = finishSubs(r.subs); // finishing the task finishes its subtasks
+    patch(id, p);
     if (!was && allDone(state.rows)) showDone();
+  }
+
+  /* ---------- subtasks ---------- */
+  // A subtask is a status and a name. Its parent follows it (see rollup): one started makes the task in progress, the last one
+  // done finishes it, one reopened puts a done task back in progress. A subtask with no name yet is a draft: it never counts,
+  // is never stored, and is gone when its name loses focus empty.
+  const subsOf = (id) => { const r = rowOf(id); return (r && r.subs) || []; };
+  /** Every subtask change goes through here. Only a status click may open the all-done popup, as with a task's own status. */
+  function patchSubs(id, subs, click) {
+    const r = rowOf(id);
+    if (!r) return;
+    const was = allDone(state.rows), status = rollup(r.status, subs);
+    patch(id, status === r.status ? { subs } : { ...statusPatchTo(r, status), subs });
+    if (click && !was && allDone(state.rows)) showDone();
+  }
+  function subEl(id, sid) { const el = els.get(id); return el && el._subs ? el._subs.get(sid) : null; }
+  /** Adds a draft subtask at `at` (the end by default) and puts the cursor in it. One draft per task: an existing draft gets the cursor instead. */
+  function addSub(id, at) {
+    const subs = subsOf(id);
+    if (!rowOf(id)) return;
+    let draft = subs.find((x) => !x.name.trim());
+    if (!draft) {
+      draft = { id: uid(), name: '', status: 0 };
+      const next = subs.slice();
+      next.splice(at == null ? next.length : at, 0, draft);
+      state.rows = state.rows.map((r) => (r.id === id ? { ...r, subs: next } : r));
+      touched = true;
+      render();
+    }
+    const se = subEl(id, draft.id);
+    if (se) { $('.sni', se).focus(); se.scrollIntoView({ block: 'nearest' }); }
+  }
+  function commitSub(inp, viaEnter) {
+    const el = inp.closest('.row'), se = inp.closest('.sub');
+    if (!el || !se) return;
+    const id = el.dataset.id, sid = se.dataset.sid, subs = subsOf(id), i = subs.findIndex((x) => x.id === sid);
+    if (i < 0) return;
+    const old = subs[i];
+    let v = inp.value.trim();
+    if (!v && old.name) v = old.name; // a named subtask always keeps a name
+    inp.value = v;
+    if (!v) { patchSubs(id, subs.filter((x) => x.id !== sid), false); return; } // an empty draft is dropped
+    if (v !== old.name) patchSubs(id, subs.map((x) => (x.id === sid ? { ...x, name: v } : x)), false);
+    if (viaEnter) addSub(id, i + 1); // Enter starts the next subtask right below
+  }
+  function cancelSub(inp) {
+    const el = inp.closest('.row'), se = inp.closest('.sub');
+    if (!el || !se) return;
+    const x = subsOf(el.dataset.id).find((y) => y.id === se.dataset.sid);
+    inp.value = x ? x.name : '';
+    inp.blur(); // a draft goes away on blur
+  }
+  function cycleSub(id, sid) {
+    patchSubs(id, subsOf(id).map((x) => (x.id === sid ? { ...x, status: (x.status + 1) % 3 } : x)), true);
+  }
+  function removeSub(id, sid) { patchSubs(id, subsOf(id).filter((x) => x.id !== sid), false); }
+  /** The caret: shows or hides the subtasks of a done task, or of one with none yet (which opens with a draft to type the first). */
+  function toggleSubs(id) {
+    const r = rowOf(id);
+    if (!r || subsForced(r)) return;
+    const open = !opened.has(id);
+    setOpened(id, open);
+    render();
+    if (open && !namedSubs(r.subs).length) addSub(id);
   }
 
   /* ---------- list events ---------- */
@@ -1024,8 +1218,17 @@ function savesCsv(saves) {
     const el = e.target.closest('.row');
     if (!el) return;
     const id = el.dataset.id, t = e.target;
-    if (t.closest('.st')) cycleStatus(id);
-    else if (t.closest('.rm')) { state.rows = removeRow(state.rows, id, state.chain); if (pending && pending.id === id) pending = null; commit(); }
+    if (t.closest('.subs')) {
+      const se = t.closest('.sub');
+      if (t.closest('.sadd')) addSub(id);
+      else if (se && t.closest('.sst')) cycleSub(id, se.dataset.sid);
+      else if (se && t.closest('.srm')) removeSub(id, se.dataset.sid);
+      else if (se && t.closest('.snm')) { const i = $('.sni', se); if (document.activeElement !== i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+      return;
+    }
+    if (t.closest('.ex')) toggleSubs(id);
+    else if (t.closest('.st')) cycleStatus(id);
+    else if (t.closest('.rm')) { state.rows = removeRow(state.rows, id, state.chain); if (pending && pending.id === id) pending = null; setOpened(id, false); commit(); }
     else if (t.closest('.pc')) resolvePending(false);
     else if (t.closest('.pd')) resolvePending(true);
     else if (t.closest('.px')) cancelPending();
@@ -1046,7 +1249,8 @@ function savesCsv(saves) {
     const el = e.target.closest('.row');
     if (!el) return;
     const to = e.relatedTarget;
-    if (e.target.matches('.nmi')) commitName(el, false);
+    if (e.target.matches('.sni')) commitSub(e.target, false);
+    else if (e.target.matches('.nmi')) commitName(el, false);
     else if (e.target.matches('.tfi')) commitText(e.target);
     else if (e.target.closest('.de')) { if (!(to && $('.de', el).contains(to))) commitDur(el, false); }
     else if (e.target.closest('.se')) { if (!(to && $('.se', el).contains(to))) commitStart(el); }
@@ -1056,7 +1260,10 @@ function savesCsv(saves) {
   list.addEventListener('keydown', (e) => {
     const t = e.target, el = t.closest('.row');
     if (!el) return;
-    if (t.matches('.sg')) {
+    if (t.matches('.sni')) {
+      if (e.key === 'Enter') { e.preventDefault(); commitSub(t, true); }
+      else if (e.key === 'Escape') cancelSub(t);
+    } else if (t.matches('.sg')) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openStart(el); } // keyboard way into an empty start
     } else if (t.matches('.nmi')) {
       if (e.key === 'Enter') { e.preventDefault(); commitName(el, true); }
@@ -1133,7 +1340,7 @@ function savesCsv(saves) {
       if (!last.name.trim()) $('.nmi', el).focus(); else $('.dh', el).focus();
       return;
     }
-    const r = { id: uid(), name: '', mins: 0, status: 0, start: null, subject: '', due: null, type: '' };
+    const r = { id: uid(), name: '', mins: 0, status: 0, start: null, subject: '', due: null, type: '', subs: [] };
     state.rows = state.rows.concat(r);
     touched = true;
     render();
@@ -1166,6 +1373,8 @@ function savesCsv(saves) {
     disarm();
     pending = null;
     state.rows = [];
+    opened.clear();
+    storeOpened();
     commit();
   });
 
@@ -1356,13 +1565,17 @@ function savesCsv(saves) {
   });
 
   /* ---------- drag to reorder ---------- */
+  // One drag for both lists: the tasks, and the subtasks inside one task. Items can differ in height (a task with its subtasks
+  // open is taller), so each keeps its own top and height, and the dragged item passes another once its leading edge reaches that one's middle.
   let track = null, drag = null, lastY = 0, raf = 0, suppressClick = false;
 
   list.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     const el = e.target.closest('.row');
-    if (!el || e.target.closest('input, .pop, .sa, .ea')) return;
-    track = { el, id: el.dataset.id, x: e.clientX, y: e.clientY, pid: e.pointerId };
+    if (!el || e.target.closest('input, .pop, .sa, .ea, .sadd')) return;
+    const se = e.target.closest('.sub');
+    if (!se && e.target.closest('.subs')) return; // the space around the subtasks drags nothing
+    track = { id: el.dataset.id, sid: se ? se.dataset.sid : null, x: e.clientX, y: e.clientY, pid: e.pointerId };
   });
 
   window.addEventListener('pointermove', (e) => {
@@ -1370,6 +1583,7 @@ function savesCsv(saves) {
     if (!drag) {
       if (Math.hypot(e.clientX - track.x, e.clientY - track.y) < 5) return;
       startDrag(e);
+      if (!drag) return;
     }
     lastY = e.clientY;
     moveDrag();
@@ -1383,12 +1597,26 @@ function savesCsv(saves) {
     const a = document.activeElement;
     if (a && a !== document.body && a.blur) a.blur(); // commit any open inline edit first
     if (pending) cancelPending();
-    const from = indexOf(track.id);
-    if (from < 0) { track = null; return; }
-    const rows = state.rows.map((r) => els.get(r.id));
-    const item = rows[from];
-    const gap = parseFloat(getComputedStyle(list).rowGap) || 0;
-    drag = { rows, from, to: from, item, pitch: item.offsetHeight + gap, tops: rows.map((r) => r.offsetTop), startY: e.clientY + window.scrollY };
+    const { id, sid } = track;
+    let items, from, box;
+    if (sid) {
+      const el = els.get(id), subs = subsOf(id);
+      from = subs.findIndex((x) => x.id === sid);
+      items = el && el._subs ? subs.map((x) => el._subs.get(x.id)) : [];
+      box = el && $('.sbl', el);
+    } else {
+      from = indexOf(id);
+      items = state.rows.map((r) => els.get(r.id));
+      box = list;
+    }
+    if (from < 0 || !box || items.some((x) => !x)) { track = null; return; }
+    const item = items[from];
+    drag = {
+      id, sid, items, from, to: from, item,
+      gap: parseFloat(getComputedStyle(box).rowGap) || 0,
+      tops: items.map((x) => x.offsetTop), hs: items.map((x) => x.offsetHeight),
+      startY: e.clientY + window.scrollY,
+    };
     lastY = e.clientY;
     item.classList.add('drag');
     document.body.classList.add('dragging');
@@ -1398,17 +1626,24 @@ function savesCsv(saves) {
   }
 
   function moveDrag() {
-    const d = drag, n = d.rows.length;
+    const d = drag, n = d.items.length, f = d.from;
     const y = lastY + window.scrollY - d.startY;
-    const dy = Math.max(d.tops[0] - d.tops[d.from], Math.min(d.tops[n - 1] - d.tops[d.from], y));
+    const dy = Math.max(d.tops[0] - d.tops[f], Math.min(d.tops[n - 1] + d.hs[n - 1] - d.hs[f] - d.tops[f], y));
     d.item.style.transform = `translateY(${dy}px)`;
-    const to = Math.max(0, Math.min(n - 1, Math.round((d.tops[d.from] + dy - d.tops[0]) / d.pitch)));
+    const top = d.tops[f] + dy, bottom = top + d.hs[f];
+    let to = f; // an item is passed once the dragged one's leading edge reaches its middle
+    for (let j = 0; j < n; j++) {
+      const mid = d.tops[j] + d.hs[j] / 2;
+      if (j > f && bottom >= mid) to++;
+      else if (j < f && top <= mid) to--;
+    }
     d.to = to;
-    d.rows.forEach((r, j) => {
-      if (j === d.from) return;
+    const step = d.hs[f] + d.gap;
+    d.items.forEach((r, j) => {
+      if (j === f) return;
       let s = 0;
-      if (d.from < to && j > d.from && j <= to) s = -d.pitch;
-      else if (d.from > to && j >= to && j < d.from) s = d.pitch;
+      if (f < to && j > f && j <= to) s = -step;
+      else if (f > to && j >= to && j < f) s = step;
       r.style.transform = s ? `translateY(${s}px)` : '';
     });
   }
@@ -1431,18 +1666,21 @@ function savesCsv(saves) {
     drag = null;
     suppressClick = true;
     setTimeout(() => { suppressClick = false; }, 0);
-    // FLIP: remember where everything is, apply the new order, then slide each row from the old spot.
-    const before = new Map(d.rows.map((r) => [r, r.getBoundingClientRect().top]));
-    d.rows.forEach((r) => { r.style.transition = 'none'; r.style.transform = ''; });
+    // FLIP: remember where everything is, apply the new order, then slide each item from the old spot.
+    const before = new Map(d.items.map((r) => [r, r.getBoundingClientRect().top]));
+    d.items.forEach((r) => { r.style.transition = 'none'; r.style.transform = ''; });
     d.item.classList.remove('drag');
     document.body.classList.remove('dragging');
-    if (d.to !== d.from) { state.rows = moveRow(state.rows, d.from, d.to, state.chain); commit(); }
-    d.rows.forEach((r) => {
+    if (d.to !== d.from) {
+      if (d.sid) patch(d.id, { subs: moveSub(subsOf(d.id), d.from, d.to) });
+      else { state.rows = moveRow(state.rows, d.from, d.to, state.chain); commit(); }
+    }
+    d.items.forEach((r) => {
       const dy = before.get(r) - r.getBoundingClientRect().top;
       if (Math.abs(dy) > 0.5) r.style.transform = `translateY(${dy}px)`;
     });
     void list.offsetHeight;
-    d.rows.forEach((r) => { r.style.transition = ''; r.style.transform = ''; });
+    d.items.forEach((r) => { r.style.transition = ''; r.style.transform = ''; });
   }
 
   /* ---------- tooltips: long hover only ---------- */
@@ -1557,6 +1795,8 @@ function savesCsv(saves) {
       state.rows = remote.rows; state.times = remote.times; state.chain = remote.chain; state.cols = remote.cols;
     }
     lastJson = JSON.stringify(serialize(remote));
+    const gone = [...opened].filter((id) => !rowOf(id)); // tasks deleted elsewhere
+    if (gone.length) { for (const id of gone) opened.delete(id); storeOpened(); }
     canSave = true;
     render();
     queueSave();
