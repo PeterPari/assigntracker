@@ -72,11 +72,11 @@ svg { display: block; flex: none; }
 /* rows */
 #list { display: flex; flex-direction: column; gap: 2px; }
 .row {
-  position: relative; border-radius: 6px; box-shadow: inset 0 -1px 0 var(--line);
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; border-radius: 6px; box-shadow: inset 0 -1px 0 var(--line);
   transition: transform .16s ease, background-color .12s ease;
   user-select: none; -webkit-user-select: none;
 }
-.ln { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 11px; } /* the task's own line; its subtasks open below it */
+.ln { grid-column: 1; display: flex; align-items: center; gap: 8px; height: 32px; padding-left: 11px; } /* the task's own line; its subtasks open below it */
 /* subject banner: a solid strip on the left edge, colored by class (data-subj); grey when the subject matches none */
 .row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 6px 0 0 6px; background: var(--subj, var(--subj-none)); pointer-events: none; }
 .row[data-subj="math"] { --subj: var(--subj-math); }
@@ -152,7 +152,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .row.ed-end .ev { display: none; }
 
 .rm, .ex { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
-.ln:hover .rm, .rm:focus-visible, .ln:hover .ex, .ex:focus-visible { opacity: 1; }
+.rm { grid-column: 2; grid-row: 1 / span 2; height: auto; margin: 4px 4px 4px 8px; } /* as tall as the task and its open subtasks */
+.row:hover .rm, .rm:focus-visible, .row:hover .ex, .ex:focus-visible { opacity: 1; }
 .rm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); }
 .ex:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
 .ex svg { transition: transform .16s ease; }
@@ -160,7 +161,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .row.forced .ex { display: none; } /* an unfinished task with subtasks always shows them: nothing to toggle */
 
 /* subtasks: a status and a name per line, indented to the task's name */
-.subs { display: none; padding: 0 4px 5px 41px; }
+.subs { grid-column: 1; display: none; padding: 0 0 5px 41px; }
 .row.open .subs { display: block; }
 .sbl { display: flex; flex-direction: column; }
 .sub { position: relative; display: flex; align-items: center; gap: 4px; height: 26px; border-radius: 5px; transition: transform .16s ease; }
@@ -179,7 +180,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .srm { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
 .sub:hover .srm, .srm:focus-visible { opacity: 1; }
 .srm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); }
-.sadd { width: 22px; height: 22px; display: grid; place-items: center; margin-top: 2px; border-radius: 5px; color: var(--muted); }
+.sadd { width: 22px; height: 22px; display: grid; place-items: center; margin-top: 2px; border-radius: 5px; color: var(--muted); opacity: 0; }
+.row:hover .sadd, .sadd:focus-visible { opacity: 1; }
 .sadd:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
 
 /* chaining warning popup, beside the start field */
@@ -672,9 +674,9 @@ function savesCsv(saves) {
       </div>
     </div>
     <button class="ex" type="button" aria-expanded="false">${icon('chev', 15)}</button>
-    <button class="rm" type="button" data-tip="Delete" aria-label="Delete">${icon('x', 15)}</button>
     </div>
-    <div class="subs"><div class="sbl"></div><button class="sadd" type="button" data-tip="Add subtask" aria-label="Add subtask">${icon('plus', 13)}</button></div>`;
+    <div class="subs"><div class="sbl"></div><button class="sadd" type="button" data-tip="Add subtask" aria-label="Add subtask">${icon('plus', 13)}</button></div>
+    <button class="rm" type="button" data-tip="Delete" aria-label="Delete">${icon('x', 15)}</button>`;
   const SUB_HTML = `
     <button class="sst" type="button"></button>
     <div class="snm"><input class="sni" type="text" maxlength="200" placeholder="Subtask" autocomplete="off" spellcheck="false" aria-label="Subtask"></div>
