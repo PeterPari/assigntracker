@@ -6,9 +6,9 @@ import { INDEX } from './harness.mjs';
 
 const html = readFileSync(INDEX, 'utf8');
 const block = html.match(/\/\* <logic> \*\/([\s\S]*?)\/\* <\/logic> \*\//)[1];
-const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow, validDue, colsOf, subjectKey, csvCell, stamp, SAVE_HEADER, saveKey, saveRecord, savedIds, savesCsv };`)();
+const L = new Function(`${block}; return { fmtDur, fmtDurLong, allDone, totalMins, countLabel, fmtClock, startFromParts, durationFromEnd, durationOnDone, isComplete, schedule, progress, moveRow, removeRow, chainOn, keepPlan, serialize, hydrate, cleanRow, validDue, colsOf, subjectKey, csvCell, stamp, SAVE_HEADER, saveKey, saveRecord, savedIds, savesCsv, namedSubs, rollup, finishSubs, subsForced, subsShown, moveSub, cleanSub, cleanSubs };`)();
 
-const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, subject: '', due: null, type: '', ...o });
+const row = (id, mins, o = {}) => ({ id, name: id, mins, status: 0, start: null, subject: '', due: null, type: '', subs: [], ...o });
 const NO_COLS = { subject: false, due: false, type: false };
 const H = (h, m = 0) => h * 60 + m;
 
@@ -402,4 +402,76 @@ test('subjectKey accepts common aliases and course names', () => {
 });
 test('subjectKey is empty for an unknown, blank or missing subject', () => {
   for (const s of ['', '   ', 'Gym', 'Chemistry', 'Maintenance', 'Chair', 'Air quality', 'Aim', 'CSV', 'Philip', 'Historic', null, undefined]) assert.equal(L.subjectKey(s), '', String(s));
+});
+
+const sub = (id, status = 0, name = id) => ({ id, name, status });
+
+test('rollup: a started subtask starts the task, the last one done finishes it, a reopened one makes it in progress', () => {
+  assert.equal(L.rollup(0, [sub('a'), sub('b')]), 0, 'nothing started');
+  assert.equal(L.rollup(0, [sub('a', 1), sub('b')]), 1);
+  assert.equal(L.rollup(0, [sub('a', 2), sub('b')]), 1, 'one done counts as started');
+  assert.equal(L.rollup(1, [sub('a', 2), sub('b', 2)]), 2);
+  assert.equal(L.rollup(0, [sub('a', 2)]), 2);
+  assert.equal(L.rollup(2, [sub('a', 2), sub('b', 0)]), 1, 'reopened');
+  assert.equal(L.rollup(1, [sub('a'), sub('b')]), 1, 'never back to not started');
+  assert.equal(L.rollup(2, []), 2, 'no subtasks: unchanged');
+  assert.equal(L.rollup(1, [sub('d', 0, '  ')]), 1, 'a draft does not count');
+  assert.equal(L.rollup(1, [sub('a', 2), sub('d', 0, '')]), 2, 'a draft never holds a task open');
+});
+
+test('finishSubs marks every subtask done; namedSubs skips drafts', () => {
+  assert.deepEqual(L.finishSubs([sub('a'), sub('b', 1), sub('c', 2)]).map((x) => x.status), [2, 2, 2]);
+  assert.deepEqual(L.finishSubs(undefined), []);
+  assert.deepEqual(L.namedSubs([sub('a'), sub('d', 0, ' ')]).map((x) => x.id), ['a']);
+  assert.deepEqual(L.namedSubs(undefined), []);
+});
+
+test('subsShown: an unfinished task with subtasks always shows them; otherwise only when opened', () => {
+  assert.equal(L.subsShown(row('a', 5, { subs: [sub('x')] }), false), true);
+  assert.equal(L.subsForced(row('a', 5, { subs: [sub('x')] })), true);
+  assert.equal(L.subsShown(row('a', 5, { status: 2, subs: [sub('x', 2)] }), false), false, 'done: folded away');
+  assert.equal(L.subsShown(row('a', 5, { status: 2, subs: [sub('x', 2)] }), true), true, 'done, opened with the caret');
+  assert.equal(L.subsForced(row('a', 5, { status: 2, subs: [sub('x', 2)] })), false);
+  assert.equal(L.subsShown(row('a', 5), false), false, 'no subtasks');
+  assert.equal(L.subsShown(row('a', 5), true), true);
+  assert.equal(L.subsForced(row('a', 5, { subs: [sub('d', 0, '')] })), false, 'a draft alone forces nothing');
+});
+
+test('moveSub reorders and ignores bad indexes', () => {
+  const s = [sub('a'), sub('b'), sub('c')];
+  assert.deepEqual(L.moveSub(s, 0, 2).map((x) => x.id), ['b', 'c', 'a']);
+  assert.deepEqual(L.moveSub(s, 2, 0).map((x) => x.id), ['c', 'a', 'b']);
+  assert.equal(L.moveSub(s, 1, 1), s);
+  assert.equal(L.moveSub(s, -1, 1), s);
+  assert.equal(L.moveSub(s, 0, 3), s);
+});
+
+test('serialize stores named subtasks only, and no subs at all on a row without them', () => {
+  const out = L.serialize({ chain: true, times: false, cols: NO_COLS, rows: [
+    row('a', 30, { subs: [sub('x', 1, ' Read  '), sub('d', 0, '')] }),
+    row('b', 30, { subs: [sub('e', 0, ' ')] }),
+    row('c', 30),
+  ] });
+  assert.deepEqual(out.rows[0].subs, [{ id: 'x', name: 'Read', status: 1 }]);
+  assert.equal('subs' in out.rows[1], false, 'only a draft: nothing stored');
+  assert.equal('subs' in out.rows[2], false);
+});
+
+test('hydrate reads subtasks back and defends against bad ones', () => {
+  const h = L.hydrate({ rows: [row('a', 30, { subs: [
+    sub('x', 2, 'Done one'), sub('x', 0, 'duplicate id'), { id: 'n', name: '', status: 1 }, { id: 5, name: 'bad id' }, null,
+    { id: 'q', name: 'q'.repeat(300), status: 7 }, { id: '', name: 'empty id' },
+  ] })] });
+  assert.deepEqual(h.rows[0].subs.map((x) => [x.id, x.name.length, x.status]), [['x', 8, 2], ['q', 200, 0]]);
+  assert.deepEqual(L.hydrate({ rows: [{ id: 'old', name: 'old', mins: 5 }] }).rows[0].subs, [], 'documents from before subtasks');
+  assert.deepEqual(L.hydrate({ rows: [row('a', 5, { subs: 'nope' })] }).rows[0].subs, []);
+  const many = Array.from({ length: 150 }, (_, i) => sub('s' + i));
+  assert.equal(L.cleanSubs(many).length, 100, 'capped');
+  const st = { chain: true, times: false, cols: NO_COLS, rows: [row('a', 30, { status: 1, subs: [sub('x', 1, 'One'), sub('y', 0, 'Two')] })] };
+  assert.deepEqual(L.hydrate(L.serialize(st)), st, 'round trip');
+});
+
+test('saves leave subtasks out', () => {
+  const rec = L.saveRecord({ chain: true, times: false, cols: NO_COLS, rows: [row('a', 30, { subs: [sub('x', 1, 'One')] })] }, '2026-10-14 20:00:00', 'k');
+  assert.equal('subs' in rec.rows[0], false);
 });

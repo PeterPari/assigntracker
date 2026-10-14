@@ -2119,3 +2119,205 @@ test('columns: empty subject and type show the grey placeholders "Subject" and "
     assert.equal(await page.$eval('.row .sbi', (i) => i.matches(':placeholder-shown')), true, 'and it comes back when emptied');
   });
 });
+
+/* ---------- subtasks ---------- */
+const S = (id, name, status = 0) => ({ id, name, status });
+const subNames = (page, n = 1) => page.$$eval(`.row:nth-child(${n}) .sni`, (els) => els.map((e) => e.value));
+const subTips = (page, n = 1) => page.$$eval(`.row:nth-child(${n}) .sst`, (els) => els.map((e) => e.dataset.tip));
+const opacity = (page, sel) => page.$eval(sel, (e) => getComputedStyle(e).opacity);
+const rowTip = (page, n = 1) => page.getAttribute(`.row:nth-child(${n}) .st`, 'data-tip');
+
+test('subtasks: a caret beside the x on hover opens the subtasks; Enter adds the next, Enter on an empty one ends', async () => {
+  await withPage({ initial: doc([R('a', 'Essay', 60), R('b', 'Other', 30)]) }, async (page) => {
+    assert.equal(await page.$eval('.row:nth-child(1) .rm', (e) => e.previousElementSibling.className), 'ex', 'the caret sits right before the x');
+    assert.equal(await opacity(page, '.row:nth-child(1) .ex'), '0', 'hidden until hover');
+    await page.hover('.row:nth-child(1) .nm');
+    assert.equal(await opacity(page, '.row:nth-child(1) .ex'), '1');
+    assert.equal(await page.getAttribute('.row:nth-child(1) .ex', 'aria-expanded'), 'false');
+    assert.equal(await page.locator('.row:nth-child(1) .subs').isVisible(), false);
+    await page.click('.row:nth-child(1) .ex');
+    assert.equal(await page.locator('.row:nth-child(1) .subs').isVisible(), true);
+    assert.equal(await page.getAttribute('.row:nth-child(1) .ex', 'aria-expanded'), 'true');
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'sni', 'a first subtask is ready to type');
+    assert.equal(await page.getAttribute('.row:nth-child(1) .sni', 'placeholder'), 'Subtask');
+    await page.keyboard.type('Outline');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Draft');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await subNames(page), ['Outline', 'Draft', '']);
+    await page.keyboard.press('Enter'); // empty: ends the list
+    assert.deepEqual(await subNames(page), ['Outline', 'Draft']);
+    assert.equal(await page.evaluate(() => document.activeElement.matches('input')), false);
+    assert.equal(await page.locator('.row:nth-child(2) .subs').isVisible(), false, 'other tasks stay closed');
+    // an unfinished task with subtasks always shows them: no caret
+    assert.equal(await page.locator('.row:nth-child(1) .ex').isVisible(), false);
+    assert.equal(await rowTip(page), 'Not started', 'adding subtasks starts nothing');
+    await settle(page);
+    const s = await saved(page);
+    assert.deepEqual(s.rows[0].subs, [{ id: s.rows[0].subs[0].id, name: 'Outline', status: 0 }, { id: s.rows[0].subs[1].id, name: 'Draft', status: 0 }]);
+    assert.equal('subs' in s.rows[1], false);
+    // Enter in the middle adds right below; the + adds at the end
+    await page.click('.row:nth-child(1) .sub:nth-child(1) .snm');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Sources');
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await subNames(page), ['Outline', 'Draft'], 'Esc drops a draft');
+    await page.click('.row:nth-child(1) .sub:nth-child(1) .snm');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Sources');
+    await page.keyboard.press('Tab');
+    assert.deepEqual(await subNames(page), ['Outline', 'Sources', 'Draft']);
+    await page.click('.row:nth-child(1) .sadd');
+    await page.keyboard.type('Proofread');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await subNames(page), ['Outline', 'Sources', 'Draft', 'Proofread']);
+  });
+});
+
+test('subtasks: a named subtask keeps its name, Esc undoes an edit, the x deletes one', async () => {
+  await withPage({ initial: doc([R('a', 'Essay', 60, { subs: [S('x', 'Outline'), S('y', 'Draft')] })]) }, async (page) => {
+    await page.click('.sub:nth-child(1) .snm');
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Tab');
+    assert.deepEqual(await subNames(page), ['Outline', 'Draft']);
+    await page.click('.sub:nth-child(2) .snm');
+    await page.keyboard.type(' two');
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await subNames(page), ['Outline', 'Draft']);
+    assert.equal(await opacity(page, '.sub:nth-child(1) .srm'), '0');
+    await page.hover('.sub:nth-child(1) .snm');
+    assert.equal(await opacity(page, '.sub:nth-child(1) .srm'), '1');
+    assert.equal(await opacity(page, '.row .ln .rm'), '0', 'hovering a subtask does not show the task x');
+    await page.click('.sub:nth-child(1) .srm');
+    assert.deepEqual(await subNames(page), ['Draft']);
+    await settle(page);
+    assert.deepEqual((await saved(page)).rows[0].subs.map((x) => x.name), ['Draft']);
+  });
+});
+
+test('subtasks drive the task: one started starts it, the last one done finishes it and folds them away', async () => {
+  const initial = doc([R('a', 'Essay', 60, { subs: [S('x', 'Outline'), S('y', 'Draft')] })], { times: true });
+  await withPage({ initial, now: [20, 0] }, async (page) => {
+    assert.equal(await page.locator('.subs').isVisible(), true);
+    await page.click('.sub:nth-child(1) .sst');
+    assert.deepEqual(await subTips(page), ['In progress', 'Not started']);
+    assert.equal(await rowTip(page), 'In progress');
+    assert.equal(await page.textContent('.row .sv'), '8:00 PM', 'the task start is recorded as for a status click');
+    await setNow(page, 20, 45);
+    await page.click('.sub:nth-child(1) .sst');
+    assert.equal(await rowTip(page), 'In progress');
+    await page.click('.sub:nth-child(2) .sst');
+    await page.click('.sub:nth-child(2) .sst');
+    assert.equal(await rowTip(page), 'Done');
+    assert.equal(await page.textContent('.row .dv'), '45 min', 'the end is recorded as for a status click');
+    assert.equal(await page.locator('#done').isVisible(), true, 'finishing the list through a subtask shows the popup');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('.subs').isVisible(), false, 'a done task folds its subtasks away');
+    await settle(page);
+    const r = (await saved(page)).rows[0];
+    assert.deepEqual([r.status, r.start, r.mins, r.subs.map((x) => x.status)], [2, H(20), 45, [2, 2]]);
+  });
+});
+
+test('subtasks: the caret reopens a done task; reopening a subtask puts the task back in progress', async () => {
+  await withPage({ initial: doc([R('a', 'Essay', 60, { status: 2, subs: [S('x', 'Outline', 2), S('y', 'Draft', 2)] })]) }, async (page) => {
+    assert.equal(await page.locator('.subs').isVisible(), false);
+    await page.hover('.row .nm');
+    assert.equal(await page.getAttribute('.row .ex', 'data-tip'), 'Show subtasks');
+    await page.click('.row .ex');
+    assert.equal(await page.locator('.subs').isVisible(), true);
+    assert.deepEqual(await subNames(page), ['Outline', 'Draft'], 'no draft when there are subtasks to show');
+    assert.equal(await page.getAttribute('.row .ex', 'data-tip'), 'Hide subtasks');
+    await page.click('.row .ex');
+    assert.equal(await page.locator('.subs').isVisible(), false, 'the caret hides them again');
+    await page.click('.row .ex');
+    await page.click('.sub:nth-child(2) .sst'); // done -> not started
+    assert.equal(await rowTip(page), 'In progress');
+    assert.equal(await page.locator('.subs').isVisible(), true);
+    assert.equal(await page.locator('.row .ex').isVisible(), false, 'an unfinished task with subtasks has no caret');
+    assert.equal(await page.locator('#done').isVisible(), false);
+  });
+});
+
+test('subtasks: finishing the task by hand finishes them all; un-marking it leaves them alone', async () => {
+  await withPage({ initial: doc([R('a', 'Essay', 60, { status: 1, subs: [S('x', 'Outline', 1), S('y', 'Draft')] })]) }, async (page) => {
+    await page.click('.row .st');
+    assert.equal(await rowTip(page), 'Done');
+    assert.equal(await page.locator('.subs').isVisible(), false);
+    await page.keyboard.press('Escape'); // the all-done popup
+    await page.click('.row .st');
+    assert.equal(await rowTip(page), 'Not started');
+    assert.equal(await page.locator('.subs').isVisible(), true, 'not done again: the subtasks show');
+    assert.deepEqual(await subTips(page), ['Done', 'Done']);
+  });
+});
+
+test('subtasks: deleting the last open one finishes the task without the popup', async () => {
+  await withPage({ initial: doc([R('a', 'Essay', 60, { status: 1, subs: [S('x', 'Outline', 2), S('y', 'Draft')] })]) }, async (page) => {
+    await page.hover('.sub:nth-child(2) .snm');
+    await page.click('.sub:nth-child(2) .srm');
+    assert.equal(await rowTip(page), 'Done');
+    assert.equal(await page.locator('#done').isVisible(), false);
+  });
+});
+
+test('subtasks: which tasks are opened with the caret is remembered on this device', async () => {
+  await withPage({ initial: doc([R('a', 'One', 30, { status: 2, subs: [S('x', 'Sub', 2)] }), R('b', 'Two', 30, { status: 2 })]) }, async (page) => {
+    await page.hover('.row:nth-child(1) .nm');
+    await page.click('.row:nth-child(1) .ex');
+    await page.reload();
+    await page.waitForTimeout(120);
+    assert.equal(await page.locator('.row:nth-child(1) .subs').isVisible(), true);
+    assert.equal(await page.locator('.row:nth-child(2) .subs').isVisible(), false);
+    assert.deepEqual(JSON.parse(await page.evaluate(() => localStorage.getItem('subsOpen'))), ['a']);
+    const doc1 = await saved(page);
+    assert.equal(JSON.stringify(doc1).includes('open'), false, 'the open state is not shared');
+  });
+});
+
+test('subtasks: drag reorders them inside their task', async () => {
+  await withPage({ initial: doc([R('a', 'Essay', 60, { subs: [S('x', 'One'), S('y', 'Two'), S('z', 'Three')] }), R('b', 'Other', 30)]) }, async (page) => {
+    const one = await page.locator('.sub:nth-child(1) .snm').boundingBox(), three = await page.locator('.sub:nth-child(3)').boundingBox();
+    await page.mouse.move(one.x + 40, one.y + one.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(one.x + 40, one.y + 15, { steps: 4 });
+    await page.mouse.move(one.x + 40, three.y + three.height / 2 + 4, { steps: 10 });
+    assert.equal(await page.locator('.sub.drag').count(), 1);
+    assert.equal(await page.locator('.row.drag').count(), 0, 'the task stays put');
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    assert.deepEqual(await subNames(page), ['Two', 'Three', 'One']);
+    assert.deepEqual(await names(page), ['Essay', 'Other']);
+    assert.equal(await page.evaluate(() => document.activeElement.matches('input')), false, 'drag did not start an edit');
+    await settle(page);
+    assert.deepEqual((await saved(page)).rows[0].subs.map((x) => x.name), ['Two', 'Three', 'One']);
+  });
+});
+
+test('subtasks: a task with its subtasks open drags as one, and other tasks drag past it', async () => {
+  await withPage({ initial: doc([R('a', 'Tall', 60, { subs: [S('x', 'One'), S('y', 'Two'), S('z', 'Three')] }), R('b', 'Two', 30), R('c', 'Three', 30)]) }, async (page) => {
+    const line = (n) => page.locator(`.row:nth-child(${n}) .ln`).boundingBox();
+    // the last task up over the tall one
+    let from = await line(3), to = await line(1);
+    await page.mouse.move(from.x + 300, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + 300, from.y, { steps: 4 });
+    await page.mouse.move(from.x + 300, to.y + 4, { steps: 12 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    assert.deepEqual(await names(page), ['Three', 'Tall', 'Two']);
+    // the tall task, by its own line, down past the last one
+    from = await line(2);
+    const last = await page.locator('.row:nth-child(3)').boundingBox();
+    await page.mouse.move(from.x + 300, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + 300, from.y + 25, { steps: 4 });
+    await page.mouse.move(from.x + 300, last.y + last.height + 60, { steps: 12 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    assert.deepEqual(await names(page), ['Three', 'Two', 'Tall']);
+    assert.deepEqual(await subNames(page, 3), ['One', 'Two', 'Three'], 'the subtasks came along');
+  });
+});
