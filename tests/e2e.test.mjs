@@ -2169,10 +2169,22 @@ test('subtasks: a caret beside the x on hover opens the subtasks; Enter adds the
     await page.keyboard.type('Sources');
     await page.keyboard.press('Tab');
     assert.deepEqual(await subNames(page), ['Outline', 'Sources', 'Draft']);
-    await page.mouse.move(1000, 690); // off the task: the + hides
-    assert.equal(await opacity(page, '.row:nth-child(1) .sadd'), '0');
+    assert.equal(await page.locator('.row:nth-child(1) .sadd').isVisible(), true, 'shown while the keyboard is in the task');
+    await page.evaluate(() => document.activeElement.blur());
+    await page.mouse.move(1000, 690); // off the task: the add bar takes no room
+    assert.equal(await page.locator('.row:nth-child(1) .sadd').isVisible(), false);
+    await page.click('.row:nth-child(1) .sub:nth-child(1) .sst');
+    await page.click('.row:nth-child(1) .sub:nth-child(1) .sst');
+    await page.click('.row:nth-child(1) .sub:nth-child(1) .sst');
+    await page.mouse.move(1000, 690);
+    assert.equal(await page.locator('.row:nth-child(1) .sadd').isVisible(), false, 'a clicked button does not hold it open');
+    const [rowBox, lastSub] = [await page.locator('.row:nth-child(1)').boundingBox(), await page.locator('.row:nth-child(1) .sub:last-child').boundingBox()];
+    assert.ok(rowBox.y + rowBox.height - (lastSub.y + lastSub.height) <= 4, 'not hovered: the task ends at its last subtask');
     await page.hover('.row:nth-child(1) .nm');
-    assert.equal(await opacity(page, '.row:nth-child(1) .sadd'), '1', 'the + shows while the task is hovered');
+    assert.equal(await page.locator('.row:nth-child(1) .sadd').isVisible(), true, 'the add bar shows while the task is hovered');
+    const [bar, list] = [await page.locator('.row:nth-child(1) .sadd').boundingBox(), await page.locator('.row:nth-child(1) .sbl').boundingBox()];
+    assert.ok(Math.abs(bar.width - list.width) < 1 && bar.height === 22, 'a small full-width bar, like the one under the list');
+    assert.equal(await page.$eval('.row:nth-child(1) .sadd', (e) => getComputedStyle(e).borderTopStyle), 'dashed');
     await page.click('.row:nth-child(1) .sadd');
     await page.keyboard.type('Proofread');
     await page.keyboard.press('Enter');

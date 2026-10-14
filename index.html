@@ -161,7 +161,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .row.forced .ex { display: none; } /* an unfinished task with subtasks always shows them: nothing to toggle */
 
 /* subtasks: a status and a name per line, indented to the task's name */
-.subs { grid-column: 1; display: none; padding: 0 0 5px 41px; }
+.subs { grid-column: 1; display: none; padding: 0 0 3px 41px; }
 .row.open .subs { display: block; }
 .sbl { display: flex; flex-direction: column; }
 .sub { position: relative; display: flex; align-items: center; gap: 4px; height: 26px; border-radius: 5px; transition: transform .16s ease; }
@@ -180,9 +180,10 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .srm { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
 .sub:hover .srm, .srm:focus-visible { opacity: 1; }
 .srm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); }
-.sadd { width: 22px; height: 22px; display: grid; place-items: center; margin-top: 2px; border-radius: 5px; color: var(--muted); opacity: 0; }
-.row:hover .sadd, .sadd:focus-visible { opacity: 1; }
-.sadd:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+/* the add bar under the list, small: it only takes room while the task is hovered or being edited, so the task ends at its last subtask */
+.sadd { display: none; align-items: center; justify-content: center; width: 100%; height: 22px; margin: 3px 0 2px; border: 1px dashed var(--line-2); border-radius: 5px; color: var(--muted); }
+.row:hover .sadd, .row:has(:focus-visible) .sadd { display: flex; } /* typing or tabbing in the task counts; a clicked button does not */
+.sadd:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
 
 /* chaining warning popup, beside the start field */
 .pop { display: none; position: absolute; right: calc(100% + 10px); top: 50%; transform: translateY(-50%); z-index: 6; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
