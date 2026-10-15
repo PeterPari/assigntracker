@@ -91,8 +91,14 @@ export function mockDbScript(initial) {
   })();`;
 }
 
-export async function openPage(browser, { initial, missing, now, init } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1100, height: 700 } });
+/** An iPad, as Playwright describes it (touch, no hover, coarse pointer), for Chromium: `device: IPAD` in openPage. */
+export function ipad(name = 'iPad Pro 11 landscape') {
+  const { defaultBrowserType, ...d } = loadPlaywright().devices[name]; // eslint-disable-line no-unused-vars
+  return d;
+}
+
+export async function openPage(browser, { initial, missing, now, init, device } = {}) {
+  const ctx = await browser.newContext(device ?? { viewport: { width: 1100, height: 700 } });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));

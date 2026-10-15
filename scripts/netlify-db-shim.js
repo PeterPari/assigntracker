@@ -73,9 +73,24 @@
     }),
   };
 
+  // On a touch screen with no mouse (iPad), a file goes to the share sheet, whose "Save to Files" is where downloads belong
+  // there; a home-screen app has no downloads bar at all. Elsewhere, or when the sheet is refused, it is a plain download.
+  const touchOnly = () => !!window.matchMedia && matchMedia('(hover: none) and (pointer: coarse)').matches;
+  async function shareFile(filename, blob) {
+    if (!touchOnly() || !navigator.share || !navigator.canShare || typeof File !== 'function') return false;
+    const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+    if (!navigator.canShare({ files: [file] })) return false;
+    try { await navigator.share({ files: [file] }); return true; } catch (err) {
+      if (err && err.name === 'AbortError') throw fail('declined'); // the sheet was closed: nothing to report
+      return false; // e.g. NotAllowedError when the tap is too long ago: download it instead
+    }
+  }
+
   const downloads = {
     async save({ filename, data }) {
-      const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data]));
+      const blob = data instanceof Blob ? data : new Blob([data]);
+      if (await shareFile(filename, blob)) return { status: 'saved' };
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
