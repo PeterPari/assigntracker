@@ -64,6 +64,9 @@ test('the built page links the manifest and the touch icon, and the favicon is s
   assert.match(page, /<link rel="apple-touch-icon" href="\/apple-touch-icon\.png">/);
   assert.match(page, /<link rel="icon" href="data:image\/svg\+xml,/);
   assert.match(page, /<meta name="theme-color" content="#13151a">/);
+  assert.match(page, /<meta name="apple-mobile-web-app-capable" content="yes">/, 'opens full screen from the iPad home screen');
+  assert.match(page, /<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">/);
+  assert.match(page, /viewport-fit=cover/, 'the page draws under the status bar, and pads itself with the safe areas');
   assert.equal((page.match(/rel="manifest"/g) ?? []).length, 1);
 });
 

@@ -35,6 +35,8 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
+/* touch screens (iPad): no double-tap zoom (a quick second tap on a status is a second click), no grey tap flash, no text inflation in landscape */
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 body {
   margin: 0;
   background: var(--bg);
@@ -50,23 +52,23 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 svg { display: block; flex: none; }
 [hidden] { display: none !important; }
 
-#app { padding: 12px 14px 72px; }
+#app { padding: 12px max(14px, env(safe-area-inset-right, 0px)) calc(72px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px)); }
 @media (min-width: 720px) { #app { padding-left: 100px; padding-right: 100px; } }
 
 /* header: progress + toggles */
-.hd { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; align-items: center; gap: 6px; padding-bottom: 10px; background: var(--bg); }
+.hd { position: sticky; top: 0; padding-top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; align-items: center; gap: 6px; padding-bottom: 10px; background: var(--bg); } /* stuck at the top it also covers the status bar of a home-screen app */
 .bar { position: relative; flex: 1; height: 22px; border-radius: 6px; background: var(--bar-track); overflow: hidden; }
 .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--bar-fill); transition: width .3s ease; }
 .pct { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; font-weight: 600; letter-spacing: .2px; color: #fff; font-variant-numeric: tabular-nums; }
 .ib { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 6px; color: var(--muted); }
-.ib:hover { background: var(--raised); color: var(--text); }
+@media (hover: hover) { .ib:hover { background: var(--raised); color: var(--text); } }
 .ib.on { color: var(--accent); background: var(--accent-bg); }
 .ib.warn { color: var(--st-prog); cursor: default; }
 
 /* hamburger menu: a small column of toggles under the hamburger */
-.mp { position: absolute; top: 30px; right: 32px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
-.mp .ib:hover { background: rgba(255, 255, 255, .08); }
-.mp .ib.on:hover { background: var(--accent-bg); }
+.mp { position: absolute; top: calc(100% - 6px); right: 32px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+@media (hover: hover) { .mp .ib:hover { background: rgba(255, 255, 255, .08); } }
+@media (hover: hover) { .mp .ib.on:hover { background: var(--accent-bg); } }
 .msep { width: 18px; height: 1px; margin: 2px 0; background: var(--line-2); }
 
 /* rows */
@@ -74,7 +76,7 @@ svg { display: block; flex: none; }
 .row {
   position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; border-radius: 6px; box-shadow: inset 0 -1px 0 var(--line);
   transition: transform .16s ease, background-color .12s ease;
-  user-select: none; -webkit-user-select: none;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 .ln { grid-column: 1; display: flex; align-items: center; gap: 8px; height: 32px; padding-left: 11px; } /* the task's own line; its subtasks open below it */
 /* subject banner: a solid strip on the left edge, colored by class (data-subj); grey when the subject matches none */
@@ -87,14 +89,14 @@ svg { display: block; flex: none; }
 .row[data-subj="aics"] { --subj: var(--subj-aics); }
 .row[data-subj="philosophy"] { --subj: var(--subj-philosophy); }
 .row[data-subj="research"] { --subj: var(--subj-research); }
-.row:hover { background: var(--row-hover); }
+@media (hover: hover) { .row:hover { background: var(--row-hover); } }
 .row.done { background: var(--done-bg); }
-.row.done:hover { background: rgba(76, 195, 138, .11); }
+@media (hover: hover) { .row.done:hover { background: rgba(76, 195, 138, .11); } }
 .row.drag { transition: none; z-index: 4; background: var(--raised); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
 body.dragging, body.dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 
 .st { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 50%; }
-.st:hover { background: rgba(255, 255, 255, .06); }
+@media (hover: hover) { .st:hover { background: rgba(255, 255, 255, .06); } }
 .s0 .st { color: var(--st-none); }
 .s1 .st { color: var(--st-prog); }
 .s2 .st { color: var(--st-done); }
@@ -114,14 +116,14 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 #list.c-subject .cs, #list.c-type .ct { display: flex; }
 #list.c-due .cd { display: block; }
 .ddi { width: 100%; height: 24px; padding: 0 4px 0 6px; border-radius: 5px; color-scheme: dark; font-variant-numeric: tabular-nums; }
-.ddi:hover { background: var(--raised); }
+@media (hover: hover) { .ddi:hover { background: var(--raised); } }
 .ddi:focus { background: var(--raised); box-shadow: inset 0 0 0 1px var(--accent); }
 .ddi.empty { color: var(--muted); }
 .ddi::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
 
 .du { flex: none; display: flex; justify-content: flex-end; min-width: 108px; }
 .dv { display: none; height: 24px; padding: 0 6px; border-radius: 5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.dv:hover, .sv:hover { background: var(--raised); }
+@media (hover: hover) { .dv:hover, .sv:hover { background: var(--raised); } }
 .row.has-dur:not(.ed-dur) .dv { display: block; }
 .de { display: none; align-items: center; gap: 3px; height: 24px; padding: 0 6px; border-radius: 5px; background: var(--raised); }
 .row.ed-dur .de, .row:not(.has-dur) .de { display: flex; }
@@ -148,14 +150,15 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .ec.blank svg { visibility: hidden; }
 .ev { height: 24px; padding: 0 6px; border-radius: 5px; cursor: default; }
 .ev:not(:disabled) { cursor: text; }
-.ev:not(:disabled):hover { background: var(--raised); }
+@media (hover: hover) { .ev:not(:disabled):hover { background: var(--raised); } }
 .row.ed-end .ev { display: none; }
 
 .rm, .ex { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
 .rm { grid-column: 2; grid-row: 1 / span 2; height: auto; margin: 4px 4px 4px 8px; } /* as tall as the task and its open subtasks */
-.row:hover .rm, .rm:focus-visible, .row:hover .ex, .ex:focus-visible { opacity: 1; }
-.rm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); }
-.ex:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+.rm:focus-visible, .ex:focus-visible, .row.hov .rm, .row.hov .ex { opacity: 1; } /* .hov: the row last touched, on a touch screen */
+@media (hover: hover) { .row:hover .rm, .row:hover .ex { opacity: 1; } }
+@media (hover: hover) { .rm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); } }
+@media (hover: hover) { .ex:hover { color: var(--text); background: rgba(255, 255, 255, .06); } }
 .ex svg { transition: transform .16s ease; }
 .row.open .ex svg { transform: rotate(180deg); }
 .row.forced .ex { display: none; } /* an unfinished task with subtasks always shows them: nothing to toggle */
@@ -168,7 +171,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .sub.drag { transition: none; z-index: 4; background: var(--raised); box-shadow: 0 4px 12px rgba(0, 0, 0, .45); }
 .sst { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 50%; }
 .sst svg { width: 14px; height: 14px; }
-.sst:hover { background: rgba(255, 255, 255, .06); }
+@media (hover: hover) { .sst:hover { background: rgba(255, 255, 255, .06); } }
 .sub.s0 .sst { color: var(--st-none); }
 .sub.s1 .sst { color: var(--st-prog); }
 .sub.s2 .sst { color: var(--st-done); }
@@ -178,12 +181,14 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .snm:focus-within .sni { pointer-events: auto; }
 .sub.s2 .sni { color: var(--done-text); }
 .srm { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; }
-.sub:hover .srm, .srm:focus-visible { opacity: 1; }
-.srm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); }
+.srm:focus-visible, .row.hov .srm { opacity: 1; }
+@media (hover: hover) { .sub:hover .srm { opacity: 1; } }
+@media (hover: hover) { .srm:hover { color: var(--danger); background: rgba(240, 113, 106, .12); } }
 /* the add bar under the list, small: it only takes room while the task is hovered or being edited, so the task ends at its last subtask */
 .sadd { display: none; align-items: center; justify-content: center; width: 100%; height: 22px; margin: 3px 0 2px; border: 1px dashed var(--line-2); border-radius: 5px; color: var(--muted); }
-.row:hover .sadd, .row:has(:focus-visible) .sadd { display: flex; } /* typing or tabbing in the task counts; a clicked button does not */
-.sadd:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
+.row.hov .sadd, .row:has(:focus-visible) .sadd { display: flex; } /* typing or tabbing in the task counts; a clicked button does not */
+@media (hover: hover) { .row:hover .sadd { display: flex; } }
+@media (hover: hover) { .sadd:hover { color: var(--text); background: rgba(255, 255, 255, .04); } }
 
 /* chaining warning popup, beside the start field */
 .pop { display: none; position: absolute; right: calc(100% + 10px); top: 50%; transform: translateY(-50%); z-index: 6; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
@@ -193,30 +198,30 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .pc { color: var(--accent); }
 .pd { color: var(--st-prog); }
 .px { color: var(--muted); }
-.pc:hover, .pd:hover, .px:hover { background: rgba(255, 255, 255, .08); }
+@media (hover: hover) { .pc:hover, .pd:hover, .px:hover { background: rgba(255, 255, 255, .08); } }
 .pop button:disabled { opacity: .35; cursor: default; background: none; }
 
 /* add, save, clear */
 .add { display: flex; align-items: center; justify-content: center; width: 100%; height: 30px; margin-top: 6px; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--muted); }
-.add:hover { color: var(--text); background: var(--row-hover); }
-.clr, .sav { position: fixed; bottom: 12px; z-index: 5; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--raised); box-shadow: 0 0 0 1px var(--line-2); }
-.clr { right: 12px; }
-.sav { right: 54px; }
-.clr:hover, .sav:hover { color: var(--text); }
+@media (hover: hover) { .add:hover { color: var(--text); background: var(--row-hover); } }
+.clr, .sav { position: fixed; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 5; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--raised); box-shadow: 0 0 0 1px var(--line-2); }
+.clr { right: calc(12px + env(safe-area-inset-right, 0px)); }
+.sav { right: calc(54px + env(safe-area-inset-right, 0px)); }
+@media (hover: hover) { .clr:hover, .sav:hover { color: var(--text); } }
 .clr.armed { color: #fff; background: var(--danger-bg); box-shadow: none; }
 .sav.ok { color: var(--st-done); }
 .sav.bad { color: var(--st-prog); }
 .clr:disabled, .sav.off:not(.dl) { opacity: .35; cursor: default; } /* .dl: Shift is held, the button downloads and is never greyed */
-.sav.off:not(.dl):hover { color: var(--muted); }
+@media (hover: hover) { .sav.off:not(.dl):hover { color: var(--muted); } }
 
 /* "save these again?" popup, just above the save button; the rows it asks about are highlighted */
-.ag { position: fixed; right: 12px; bottom: 54px; z-index: 6; display: flex; align-items: center; gap: 2px; padding: 3px 3px 3px 10px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); white-space: nowrap; }
+.ag { position: fixed; right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(54px + env(safe-area-inset-bottom, 0px)); z-index: 6; display: flex; align-items: center; gap: 2px; padding: 3px 3px 3px 10px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); white-space: nowrap; }
 .ag::after { content: ""; position: absolute; top: 100%; right: 54px; width: 8px; height: 8px; margin-top: -5px; transform: rotate(45deg); background: var(--raised); border-right: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
 .agq { margin-right: 6px; }
 .ag button { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 5px; }
 .agy { color: var(--st-done); }
 .agn { color: var(--muted); }
-.ag button:hover { background: rgba(255, 255, 255, .08); }
+@media (hover: hover) { .ag button:hover { background: rgba(255, 255, 255, .08); } }
 .row.again, .row.again:hover { background: rgba(242, 201, 76, .09); box-shadow: inset 0 0 0 1px rgba(242, 201, 76, .6); }
 
 /* all-done popup */
@@ -237,6 +242,76 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 #tip { position: fixed; z-index: 50; left: 0; top: 0; padding: 4px 8px; border-radius: 5px; background: #0b0c0f; color: var(--text); border: 1px solid var(--line-2); font-size: 12px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s ease; }
 #tip.show { opacity: 1; }
 
+/* Touch screens without a mouse (iPad): the download in the menu stands in for Shift-click on save. */
+.tonly { display: none !important; }
+@media (hover: none) { .tonly { display: grid !important; } .msep.tonly { display: block !important; } }
+
+/* Fingers (iPad): bigger targets (about 40px), and 16px text so Safari does not zoom in on a field when it takes the cursor. */
+@media (pointer: coarse) {
+  body { font-size: 16px; }
+  #app { padding-top: 14px; }
+  @media (min-width: 720px) { #app { padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); } }
+  .hd { gap: 8px; padding-bottom: 12px; }
+  .bar { height: 32px; border-radius: 8px; }
+  .pct { font-size: 14px; }
+  .ib { width: 40px; height: 40px; border-radius: 8px; }
+  .ib svg { width: 20px; height: 20px; }
+  .mp { right: 48px; gap: 4px; padding: 4px; border-radius: 10px; }
+  .msep { width: 26px; }
+  #list { gap: 3px; }
+  .ln { height: 48px; gap: 8px; padding-left: 12px; }
+  .st { width: 40px; height: 40px; }
+  .st svg { width: 22px; height: 22px; }
+  .nm, .tf, .dv, .sv, .sg, .ev, .de, .se, .ee, .ddi { height: 38px; border-radius: 7px; }
+  .nm { min-width: 110px; }
+  .cs, .ct { flex-basis: 130px; min-width: 70px; }
+  .ct { flex-basis: 150px; }
+  .cd { width: 150px; }
+  .ddi::-webkit-date-and-time-value { text-align: left; margin: 0; } /* Safari centres the date otherwise */
+  .du { min-width: 136px; }
+  .de input { width: 38px; }
+  .sc { min-width: 104px; height: 38px; }
+  .sg { width: 92px; }
+  .se input, .ee input { width: 26px; }
+  .sa, .ea { height: 28px; padding: 0 8px; font-size: 13px; border-radius: 6px; }
+  .ec { min-width: 124px; }
+  .rm, .ex { width: 40px; height: 40px; border-radius: 7px; }
+  .rm { margin: 4px 4px 4px 6px; }
+  .rm svg, .ex svg { width: 18px; height: 18px; }
+  .subs { padding: 0 0 4px 58px; }
+  .sub { height: 42px; gap: 6px; }
+  .sst { width: 36px; height: 36px; }
+  .sst svg { width: 18px; height: 18px; }
+  .snm { height: 36px; border-radius: 7px; }
+  .srm { width: 36px; height: 36px; border-radius: 7px; }
+  .srm svg { width: 16px; height: 16px; }
+  .sadd { height: 36px; margin: 4px 0 2px; border-radius: 7px; }
+  .pop { gap: 4px; padding: 4px; }
+  .pop > * { width: 40px; height: 40px; border-radius: 7px; }
+  .pop svg { width: 20px; height: 20px; }
+  .add { height: 48px; margin-top: 8px; border-radius: 8px; }
+  .clr, .sav { width: 52px; height: 52px; border-radius: 12px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .clr svg, .sav svg { width: 22px; height: 22px; }
+  .clr { right: calc(16px + env(safe-area-inset-right, 0px)); }
+  .sav { right: calc(78px + env(safe-area-inset-right, 0px)); }
+  #app { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  .ag { right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(78px + env(safe-area-inset-bottom, 0px)); gap: 4px; padding: 4px 4px 4px 14px; border-radius: 10px; }
+  .ag::after { right: 84px; }
+  .ag button { width: 44px; height: 44px; border-radius: 8px; }
+  .dx { top: 6px; right: 6px; }
+  .dxs { right: 50px; }
+  .dlg .dm { font-size: 18px; }
+  #tip { font-size: 14px; padding: 6px 10px; }
+}
+/* An iPad held upright has no room for everything on one line: the times go to a second line of the task, on the right. */
+@media (pointer: coarse) and (max-width: 1023px) {
+  .ln { gap: 6px; }
+  .cs, .ct { flex: 1 1 0; min-width: 56px; } /* share the room with the name, so only the times ever move down */
+  .cd { width: 140px; }
+  #list.times .ln { flex-wrap: wrap; height: auto; min-height: 48px; padding-top: 4px; padding-bottom: 4px; }
+  #list.times .tm { order: 10; flex-basis: 100%; justify-content: flex-end; height: 42px; }
+}
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 
@@ -252,6 +327,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
       <span class="msep" aria-hidden="true"></span>
       <button class="ib" id="times" type="button"></button>
       <button class="ib" id="chain" type="button" hidden></button>
+      <span class="msep tonly" aria-hidden="true"></span>
+      <button class="ib tonly" id="dlSaves" type="button" data-tip="Download saves" aria-label="Download saves"></button>
     </div>
     <button class="ib" id="reload" type="button" data-tip="Reload" aria-label="Reload"></button>
   </div>
@@ -1221,6 +1298,7 @@ function savesCsv(saves) {
     const el = e.target.closest('.row');
     if (!el) return;
     const id = el.dataset.id, t = e.target;
+    if (tapHidden && t.closest('.rm, .ex, .srm')) return;
     if (t.closest('.subs')) {
       const se = t.closest('.sub');
       if (t.closest('.sadd')) addSub(id);
@@ -1235,7 +1313,12 @@ function savesCsv(saves) {
     else if (t.closest('.pc')) resolvePending(false);
     else if (t.closest('.pd')) resolvePending(true);
     else if (t.closest('.px')) cancelPending();
-    else if (t.closest('.sa, .ea')) { const k = t.closest('.ea') ? 'end' : 'start'; setAp(el, k, $(TE[k].a, el).textContent === 'AM' ? 'PM' : 'AM'); }
+    else if (t.closest('.sa, .ea')) {
+      const k = t.closest('.ea') ? 'end' : 'start', box = $(k === 'end' ? '.ee' : '.se', el);
+      apDown = null;
+      setAp(el, k, $(TE[k].a, el).textContent === 'AM' ? 'PM' : 'AM');
+      if (el._ed === k && !box.contains(document.activeElement)) $(TE[k].n, el).focus(); // Safari: the field lost the cursor to the tap
+    }
     else if (t.closest('.ev')) { if (!el._ed) openEnd(el); }
     else if (t.closest('.nm, .tf')) { const i = $('.nmi, .tfi', t.closest('.nm, .tf')); if (document.activeElement !== i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
     else if (t.closest('.du')) { if (!el._ed && el.classList.contains('has-dur')) openDur(el); }
@@ -1248,6 +1331,11 @@ function savesCsv(saves) {
     if (e.target.closest('.de') && !el._ed) { el._ed = 'dur'; el.classList.add('ed-dur'); }
   });
 
+  /* Safari (the iPad's included) never gives a tapped button the focus, so a tap on AM/PM blurs the hour or minute with no
+     relatedTarget. A pointer that just went down on that row's AM/PM button means the edit goes on. */
+  let apDown = null;
+  const apHeld = (el, sel) => !!apDown && apDown === $(sel, el);
+  list.addEventListener('mousedown', (e) => { if (e.target.closest('.sa, .ea')) e.preventDefault(); }); // the field keeps the cursor
   list.addEventListener('focusout', (e) => {
     const el = e.target.closest('.row');
     if (!el) return;
@@ -1256,8 +1344,8 @@ function savesCsv(saves) {
     else if (e.target.matches('.nmi')) commitName(el, false);
     else if (e.target.matches('.tfi')) commitText(e.target);
     else if (e.target.closest('.de')) { if (!(to && $('.de', el).contains(to))) commitDur(el, false); }
-    else if (e.target.closest('.se')) { if (!(to && $('.se', el).contains(to))) commitStart(el); }
-    else if (e.target.closest('.ee')) { if (!(to && $('.ee', el).contains(to))) commitEnd(el); }
+    else if (e.target.closest('.se')) { if (!(to && $('.se', el).contains(to)) && !apHeld(el, '.sa')) commitStart(el); }
+    else if (e.target.closest('.ee')) { if (!(to && $('.ee', el).contains(to)) && !apHeld(el, '.ea')) commitEnd(el); }
   });
 
   list.addEventListener('keydown', (e) => {
@@ -1535,6 +1623,16 @@ function savesCsv(saves) {
     (document.activeElement === againYes ? againNo : againYes).focus();
   });
 
+  /* No Shift on a touch screen: the menu has a download button instead (shown only where there is no hover). */
+  const dlBtn = $('#dlSaves');
+  dlBtn.innerHTML = icon('download', 17);
+  dlBtn.addEventListener('click', async () => {
+    if (saveBusy) return;
+    setMenu(false);
+    saveBusy = true;
+    try { flashSave(await downloadSaves()); } finally { saveBusy = false; }
+  });
+
   sav.addEventListener('mousedown', (e) => { if (e.shiftKey) e.preventDefault(); }); // a Shift-click must not select text
   sav.addEventListener('click', async (e) => {
     if (closeAgain()) return;
@@ -1552,6 +1650,19 @@ function savesCsv(saves) {
   sav.addEventListener('pointerenter', () => { overSave = true; syncSave(); });
   sav.addEventListener('pointerleave', () => { overSave = false; syncSave(); });
 
+  /* Touch has no hover, so the row last touched shows what a hovered row shows (its x, caret and subtask + bar).
+     A tap on one of those while it was still hidden only shows it: a finger cannot aim at a button it cannot see. */
+  let tapHidden = false;
+  document.addEventListener('pointerdown', (e) => {
+    apDown = e.target.closest ? e.target.closest('.sa, .ea') : null;
+    suppressClick = false;
+    if (e.pointerType === 'mouse') { tapHidden = false; return; }
+    const el = e.target.closest ? e.target.closest('.row') : null;
+    tapHidden = !(el && el.classList.contains('hov'));
+    for (const r of els.values()) if (r !== el) r.classList.remove('hov');
+    if (el) el.classList.add('hov');
+  }, true);
+  document.addEventListener('keydown', () => { tapHidden = false; }, true);
   document.addEventListener('pointerdown', (e) => {
     if (pending && !e.target.closest('.pop')) cancelPending();
     if (armed && !e.target.closest('#clear')) disarm();
@@ -1570,7 +1681,10 @@ function savesCsv(saves) {
   /* ---------- drag to reorder ---------- */
   // One drag for both lists: the tasks, and the subtasks inside one task. Items can differ in height (a task with its subtasks
   // open is taller), so each keeps its own top and height, and the dragged item passes another once its leading edge reaches that one's middle.
+  // A mouse drags after 5px. A finger (or pencil) has to hold still for a moment first, so a swipe still scrolls the page.
   let track = null, drag = null, lastY = 0, raf = 0, suppressClick = false;
+  const PRESS_MS = 300, SLOP = 10;
+  function dropTrack() { if (track) clearTimeout(track.timer); track = null; }
 
   list.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
@@ -1578,13 +1692,24 @@ function savesCsv(saves) {
     if (!el || e.target.closest('input, .pop, .sa, .ea, .sadd')) return;
     const se = e.target.closest('.sub');
     if (!se && e.target.closest('.subs')) return; // the space around the subtasks drags nothing
-    track = { id: el.dataset.id, sid: se ? se.dataset.sid : null, x: e.clientX, y: e.clientY, pid: e.pointerId };
+    dropTrack();
+    const touch = e.pointerType !== 'mouse';
+    track = { id: el.dataset.id, sid: se ? se.dataset.sid : null, x: e.clientX, y: e.clientY, pid: e.pointerId, touch, timer: 0 };
+    if (touch) {
+      const t = track;
+      t.timer = setTimeout(() => { if (track === t && !drag) startDrag({ clientX: t.x, clientY: t.y, pointerId: t.pid }); }, PRESS_MS);
+    }
   });
+  // Once a finger drag has begun the page must not scroll under it (iOS scrolls unless the touchmove is cancelled).
+  list.addEventListener('touchmove', (e) => { if (drag && e.cancelable) e.preventDefault(); }, { passive: false });
+  list.addEventListener('contextmenu', (e) => { if (drag || (track && track.touch)) e.preventDefault(); });
 
   window.addEventListener('pointermove', (e) => {
     if (!track || e.pointerId !== track.pid) return;
     if (!drag) {
-      if (Math.hypot(e.clientX - track.x, e.clientY - track.y) < 5) return;
+      const far = Math.hypot(e.clientX - track.x, e.clientY - track.y);
+      if (track.touch) { if (far >= SLOP) dropTrack(); return; } // moved before the hold: a scroll, not a drag
+      if (far < 5) return;
       startDrag(e);
       if (!drag) return;
     }
@@ -1612,10 +1737,10 @@ function savesCsv(saves) {
       items = state.rows.map((r) => els.get(r.id));
       box = list;
     }
-    if (from < 0 || !box || items.some((x) => !x)) { track = null; return; }
+    if (from < 0 || !box || items.some((x) => !x)) { dropTrack(); return; }
     const item = items[from];
     drag = {
-      id, sid, items, from, to: from, item,
+      id, sid, items, from, to: from, item, touch: track.touch,
       gap: parseFloat(getComputedStyle(box).rowGap) || 0,
       tops: items.map((x) => x.offsetTop), hs: items.map((x) => x.offsetHeight),
       startY: e.clientY + window.scrollY,
@@ -1661,14 +1786,15 @@ function savesCsv(saves) {
     raf = requestAnimationFrame(autoScroll);
   }
 
-  function endDrag() {
-    track = null;
+  function endDrag(e) {
+    if (track && e && e.pointerId !== track.pid) return;
+    dropTrack();
     if (!drag) return;
     cancelAnimationFrame(raf);
     const d = drag;
     drag = null;
-    suppressClick = true;
-    setTimeout(() => { suppressClick = false; }, 0);
+    suppressClick = true; // the click that ends a drag does nothing; a finger's may come a little later (the next touch clears it)
+    setTimeout(() => { suppressClick = false; }, d.touch ? 600 : 0);
     // FLIP: remember where everything is, apply the new order, then slide each item from the old spot.
     const before = new Map(d.items.map((r) => [r, r.getBoundingClientRect().top]));
     d.items.forEach((r) => { r.style.transition = 'none'; r.style.transform = ''; });

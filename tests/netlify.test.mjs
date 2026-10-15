@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPlaywright } from './harness.mjs';
+import { ipad, loadPlaywright } from './harness.mjs';
 import { startSite, startTestDb } from './netlify-harness.mjs';
 
 const { chromium } = loadPlaywright();
@@ -36,8 +36,8 @@ const seed = async (rows, o = {}) => {
   site.calls.length = 0; // only what the page does is counted
 };
 
-async function openSite({ init } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1100, height: 700 } });
+async function openSite({ init, device } = {}) {
+  const ctx = await browser.newContext(device ?? { viewport: { width: 1100, height: 700 } });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -339,5 +339,51 @@ test('save: each click adds a save to the database; repeats are asked about; Shi
       + D + ',Not started,Read ch. 4,Biology,,,45,,,a\n' + D + ',Not started,Essay,,,,90,,,b\n' + D + ',Not started,Lab notes,,,,20,,,[a-z0-9]+\n$'));
     assert.equal((await kept()).length, 2, 'Shift-click saves nothing');
     assert.deepEqual(errors, [], 'nothing blocked by the site CSP');
+  });
+});
+
+test('the built page on an iPad: home-screen app tags, and the saves CSV goes to the share sheet ("Save to Files")', async () => {
+  await seed([R('a', 'Essay', 90, { status: 2 })]);
+  // Stand-in share sheet: records what it is given; window.__shareFails makes it refuse like Safari does.
+  const SHEET = `window.__shared = []; window.__shareFails = null;
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: (d) => !!(d && d.files && d.files.length) });
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async (d) => {
+      if (window.__shareFails) throw new DOMException('no', window.__shareFails);
+      for (const f of d.files) window.__shared.push({ name: f.name, type: f.type, text: await f.text() });
+    } });`;
+  let downloads = 0;
+  await withSite({ init: SHEET, device: ipad() }, async (page, errors) => {
+    page.on('download', () => { downloads++; });
+    const meta = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('meta[name^=apple-mobile-web-app]')].map((m) => [m.name, m.content])));
+    assert.deepEqual(meta, { 'apple-mobile-web-app-capable': 'yes', 'apple-mobile-web-app-status-bar-style': 'black-translucent', 'apple-mobile-web-app-title': 'Assignments' });
+    await page.tap('#save');
+    await page.waitForTimeout(400);
+    assert.equal(await page.getAttribute('#save', 'aria-label'), 'Saved');
+    await page.waitForTimeout(2400);
+
+    await page.tap('#menu');
+    await page.tap('#dlSaves');
+    await page.waitForTimeout(400);
+    const shared = await page.evaluate(() => window.__shared);
+    assert.equal(shared.length, 1);
+    assert.match(shared[0].name, /^assignment-saves-\d{4}-\d\d-\d\d\.csv$/);
+    assert.match(shared[0].type, /^text\/csv/);
+    assert.match(shared[0].text, /^﻿?Saved,Status,Assignment,.*\n.*,Done,Essay,/s);
+    assert.equal(await page.getAttribute('#save', 'aria-label'), 'Downloaded');
+    assert.equal(downloads, 0, 'no download bar on an iPad: the sheet handles it');
+    await page.waitForTimeout(2400);
+
+    await page.evaluate(() => { window.__shareFails = 'AbortError'; }); // the sheet closed: nothing to say
+    await page.tap('#menu');
+    await page.tap('#dlSaves');
+    await page.waitForTimeout(400);
+    assert.equal(await page.getAttribute('#save', 'aria-label'), 'Save');
+    assert.equal(downloads, 0);
+
+    await page.evaluate(() => { window.__shareFails = 'NotAllowedError'; }); // the tap was too long ago: a plain download instead
+    await page.tap('#menu');
+    const [download] = await Promise.all([page.waitForEvent('download'), page.tap('#dlSaves')]);
+    assert.match(download.suggestedFilename(), /^assignment-saves-.*\.csv$/);
+    assert.deepEqual(errors, []);
   });
 });

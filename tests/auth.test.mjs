@@ -1,7 +1,7 @@
 // The site password: the Basic Auth check (netlify/lib/auth.mjs) and the edge function that applies it to every request.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkAuth } from '../netlify/lib/auth.mjs';
+import { checkAuth, hasSession, login, LOGIN_PATH, SESSION_COOKIE, sessionCookie } from '../netlify/lib/auth.mjs';
 import edge, { config } from '../netlify/edge-functions/auth.mjs';
 
 const PASSWORD = 'correct horse battery staple';
@@ -161,4 +161,88 @@ test('the open paths are served even when SITE_PASSWORD is not set, and everythi
   const res = await edge(req(undefined, 'https://site.test/'), context);
   assert.equal(res.status, 503);
   assert.deepEqual(ran, []);
+});
+
+// The session cookie, for a home-screen web app on an iPad, which does not keep (and may not show) the browser's login box.
+const cookieOf = (res) => res.headers.get('set-cookie')?.split(';')[0];
+const loginReq = (body, init = {}) => new Request('https://site.test' + LOGIN_PATH, { method: 'POST', body, ...init });
+
+test('the 401 page is a password form for apps that show no login box, and never holds the password', async () => {
+  const res = await checkAuth(req(), PASSWORD);
+  assert.equal(res.headers.get('content-type'), 'text/html; charset=utf-8');
+  const html = await res.text();
+  assert.match(html, /<input[^>]+type="password"/);
+  assert.match(html, new RegExp(`fetch\\('${LOGIN_PATH}'`));
+  assert.doesNotMatch(html, /horse/);
+});
+
+test('logging in with the right password sets a long-lived, HttpOnly, Secure session cookie', async () => {
+  const res = await login(loginReq(PASSWORD), PASSWORD);
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  const set = res.headers.get('set-cookie');
+  assert.match(set, new RegExp(`^${SESSION_COOKIE}=[0-9a-f]{64}; Path=/; Max-Age=\\d+; HttpOnly; Secure; SameSite=Lax$`));
+  assert.ok(Number(/Max-Age=(\d+)/.exec(set)[1]) >= 365 * 24 * 3600, 'kept for a year or more');
+  assert.doesNotMatch(set, /horse/);
+  assert.equal(set, await sessionCookie(PASSWORD));
+});
+
+test('a wrong password, a GET, or no password configured: no cookie, and never a login box', async () => {
+  for (const wrong of ['', 'wrong', PASSWORD + ' ', 'x'.repeat(20000)]) {
+    const res = await login(loginReq(wrong), PASSWORD);
+    assert.equal(res.status, 403);
+    assert.equal(res.headers.get('set-cookie'), null);
+    assert.equal(res.headers.get('www-authenticate'), null, 'a wrong password must not open the browser login box');
+  }
+  const get = await login(new Request('https://site.test' + LOGIN_PATH), PASSWORD);
+  assert.equal(get.status, 405);
+  assert.equal(get.headers.get('set-cookie'), null);
+  for (const pw of [undefined, '']) {
+    const res = await login(loginReq(''), pw);
+    assert.equal(res.status, 503);
+    assert.equal(res.headers.get('set-cookie'), null);
+  }
+});
+
+test('the session cookie lets requests through; a wrong, old or forged one does not', async () => {
+  const good = cookieOf(await login(loginReq(PASSWORD), PASSWORD));
+  const withCookie = (c) => new Request('https://site.test/api/db/tracker/list', { headers: { cookie: c } });
+  assert.equal(await checkAuth(withCookie(good), PASSWORD), null);
+  assert.equal(await checkAuth(withCookie(`other=1; ${good}; more=2`), PASSWORD), null, 'among other cookies');
+  assert.equal(await hasSession(withCookie(good), PASSWORD), true);
+  const forged = [
+    `${SESSION_COOKIE}=${'0'.repeat(64)}`, `${SESSION_COOKIE}=`, `${SESSION_COOKIE}=${PASSWORD}`, `${SESSION_COOKIE}=${good.split('=')[1].toUpperCase()}`,
+    `x${good}`, good.slice(0, -1),
+  ];
+  for (const c of forged) await assertChallenge(await checkAuth(withCookie(c), PASSWORD));
+  await assertChallenge(await checkAuth(withCookie(good), 'a new password'), 'changing SITE_PASSWORD signs everyone out');
+  assert.equal((await checkAuth(withCookie(good), undefined)).status, 503, 'no password set: closed, cookie or not');
+});
+
+test('the edge function: log in at LOGIN_PATH, then the cookie opens the page and the API', async () => {
+  envPassword = PASSWORD;
+  ran.length = 0;
+  const bad = await edge(loginReq('wrong'), context);
+  assert.equal(bad.status, 403);
+  const res = await edge(loginReq(PASSWORD), context);
+  assert.equal(res.status, 204);
+  assert.deepEqual(ran, [], 'logging in serves nothing of the site');
+  const cookie = cookieOf(res);
+  for (const path of ['/', '/api/db/tracker/list']) {
+    ran.length = 0;
+    const page = await edge(new Request('https://site.test' + path, { headers: { cookie } }), context);
+    assert.equal(await page.text(), 'the page');
+    assert.equal(page.headers.get('set-cookie'), null, 'already signed in: no new cookie');
+    assert.deepEqual(ran, ['next']);
+  }
+});
+
+test('the edge function: signing in through the login box also hands out the cookie', async () => {
+  envPassword = PASSWORD;
+  ran.length = 0;
+  const res = await edge(req(basic('peter', PASSWORD), 'https://site.test/'), context);
+  assert.equal(await res.text(), 'the page');
+  assert.equal(res.headers.get('set-cookie'), await sessionCookie(PASSWORD));
+  const later = await edge(new Request('https://site.test/', { headers: { cookie: cookieOf(res) } }), context);
+  assert.equal(await later.text(), 'the page');
 });
