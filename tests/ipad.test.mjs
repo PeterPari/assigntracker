@@ -280,7 +280,7 @@ test('on a desktop the menu has no download button (Shift-click on save does it)
 
 test('save, its repeat popup, clear and the all-done popup work by touch', async () => {
   const prior = { v: 1, k: '001791504903000-aaaaaa', at: '2026-10-07 22:15:03', rows: [{ id: 'a', name: 'A', status: 2, mins: 30 }] };
-  await withIpad({ initial: { ...doc([R('a', 'A', 30, { status: 2 }), R('b', 'B', 30, { status: 1 })]), ['saves/' + prior.k]: prior } }, async (page, f) => {
+  await withIpad({ initial: { ...doc([R('a', 'A', 30, { status: 2 }), R('c', 'C', 30, { status: 2 }), R('b', 'B', 30, { status: 1 })]), ['saves/' + prior.k]: prior } }, async (page, f) => {
     await f.tap('#save');
     await page.waitForTimeout(100);
     assert.equal(await page.locator('#again').isVisible(), true, 'asks about the repeat');
@@ -289,7 +289,7 @@ test('save, its repeat popup, clear and the all-done popup work by touch', async
     await f.tap('#againNo');
     await page.waitForTimeout(100);
     assert.equal(await page.getAttribute('#save', 'aria-label'), 'Saved');
-    await f.tap('.row:nth-child(2) .st');
+    await f.tap('.row:nth-child(3) .st');
     assert.equal(await page.locator('#done').isVisible(), true, 'all done');
     await f.tap('#doneClose');
     assert.equal(await page.locator('#done').isVisible(), false);

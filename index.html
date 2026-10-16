@@ -352,6 +352,13 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
     <span class="sr" id="shareStatus" role="status" aria-live="polite"></span>
   </div>
 </div>
+<div class="ov" id="dlDone" role="dialog" aria-modal="true" aria-labelledby="dlMsg" hidden>
+  <div class="dlg">
+    <span class="dk" id="dlIcon"></span>
+    <p class="dm" id="dlMsg">Downloaded <b id="dlStats"></b></p>
+    <button class="ib dx" id="dlClose" type="button" data-tip="Close" aria-label="Close"></button>
+  </div>
+</div>
 <div id="tip" role="tooltip"></div>
 
 <script>
@@ -600,31 +607,33 @@ function csvCell(v) {
 const stamp = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 
 /** The first line of the downloaded file. ID ties together the lines of one assignment saved on several nights. */
-const SAVE_HEADER = 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End,ID\n';
+const SAVE_HEADER = 'Saved,Assignment,Subject,Due,Type,Minutes,Start,End,ID\n';
 
 /** A save's key and document id: epoch milliseconds, zero padded so keys sort by time, then a random tail so two saves never collide. */
 const saveKey = (t, tail) => String(Math.max(0, Math.floor(t))).padStart(15, '0') + '-' + tail;
 
-/** One save as it is kept in the database: every finished row with all of its fields whatever the menu shows, plus the start and
+/** One save as it is kept in the database: every done row with all of its fields whatever the menu shows, plus the start and
  *  end the page works out (minutes since midnight, chained times included, null when a row has none), stamped with `at`.
- *  Null when nothing is finished. */
+ *  Rows not started or in progress are left out. Null when nothing is done. */
 function saveRecord(s, at, k) {
   const { rows, chain } = serialize(s), sch = schedule(rows, chain);
-  if (!rows.length) return null;
-  return {
-    v: 1, k, at,
-    rows: rows.map((r, i) => ({ id: r.id, name: r.name, subject: r.subject, type: r.type, due: r.due, status: r.status, mins: r.mins, start: sch[i].start, end: sch[i].end })),
-  };
+  const done = rows.map((r, i) => ({ id: r.id, name: r.name, subject: r.subject, type: r.type, due: r.due, status: r.status, mins: r.mins, start: sch[i].start, end: sch[i].end }))
+    .filter((r) => r.status === 2);
+  if (!done.length) return null;
+  return { v: 1, k, at, rows: done };
 }
 
 /** The rows of a save read back from the database. Shared data is untrusted: a save needs a key, a row needs an id. */
 const saveRows = (d) => (d && typeof d === 'object' && typeof d.k === 'string' && Array.isArray(d.rows)
   ? d.rows.filter((r) => r && typeof r === 'object' && typeof r.id === 'string' && r.id !== '') : []);
 
+/** The done rows of a save: the only ones a save keeps. Older saves may hold rows that were not done, which are ignored. */
+const doneRows = (d) => saveRows(d).filter((r) => r.status === 2);
+
 /** Every assignment id in earlier saves: a row on the list with one of these is a repeat. */
 function savedIds(saves) {
   const ids = new Set();
-  for (const d of saves) for (const r of saveRows(d)) ids.add(r.id);
+  for (const d of saves) for (const r of doneRows(d)) ids.add(r.id);
   return ids;
 }
 
@@ -633,17 +642,39 @@ function savedIds(saves) {
 function savesCsv(saves) {
   const txt = (v) => (typeof v === 'string' ? v : '');
   const clock = (v) => (Number.isInteger(v) && v >= 0 && v < DAY ? fmtClock(v) : '');
-  const sorted = saves.filter((d) => saveRows(d).length).sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+  const sorted = saves.filter((d) => doneRows(d).length).sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
   let lines = '';
   for (const d of sorted) {
-    for (const r of saveRows(d)) {
+    for (const r of doneRows(d)) {
       lines += [
-        txt(d.at), STATUS_TIP[r.status === 1 || r.status === 2 ? r.status : 0], txt(r.name), txt(r.subject), txt(r.due), txt(r.type),
+        txt(d.at), txt(r.name), txt(r.subject), txt(r.due), txt(r.type),
         Number.isFinite(r.mins) ? r.mins : '', clock(r.start), clock(r.end), r.id,
       ].map(csvCell).join(',') + '\n';
     }
   }
   return lines && SAVE_HEADER + lines;
+}
+
+/** What a download holds: the days the saves were made on, the different assignments (one saved on several nights counts once)
+ *  and the different assignment types. Counts the same rows the file has. */
+function savesStats(saves) {
+  const days = new Set(), ids = new Set(), types = new Set();
+  for (const d of saves) {
+    const rows = doneRows(d);
+    if (!rows.length) continue;
+    days.add(typeof d.at === 'string' ? d.at.slice(0, 10) : '');
+    for (const r of rows) {
+      ids.add(r.id);
+      if (typeof r.type === 'string' && r.type.trim()) types.add(r.type.trim().toLowerCase());
+    }
+  }
+  return { days: days.size, assignments: ids.size, types: types.size };
+}
+
+/** "15 days, 30 assignments, and 5 assignment types": the line in the popup after a download. */
+function statsLine(t) {
+  const n = (c, w) => c + ' ' + w + (c === 1 ? '' : 's');
+  return n(t.days, 'day') + ', ' + n(t.assignments, 'assignment') + ', and ' + n(t.types, 'assignment type');
 }
 /* </logic> */
 
@@ -716,6 +747,8 @@ function savesCsv(saves) {
   $('#doneIcon').innerHTML = icon('check', 28);
   $('#doneClose').innerHTML = icon('x', 16);
   $('#doneShare').innerHTML = icon('share', 16);
+  $('#dlIcon').innerHTML = icon('check', 28);
+  $('#dlClose').innerHTML = icon('x', 16);
 
   /* ---------- rows ---------- */
   const ROW_HTML = `<div class="ln">
@@ -870,7 +903,7 @@ function savesCsv(saves) {
     tChain.dataset.tip = state.chain ? 'Chaining on' : 'Chaining off';
     tChain.setAttribute('aria-label', tChain.dataset.tip);
     clr.disabled = !state.rows.length;
-    const nothing = !state.rows.some(isComplete); // greyed, but not disabled: Shift-click still downloads
+    const nothing = !state.rows.some((r) => isComplete(r) && r.status === 2); // only done rows are saved; greyed, but not disabled: Shift-click still downloads
     sav.classList.toggle('off', nothing);
     paintSaveDisabled();
   }
@@ -1090,6 +1123,26 @@ function savesCsv(saves) {
     const stops = [shareBtn, doneClose], i = stops.indexOf(document.activeElement);
     stops[(i + (e.shiftKey ? -1 : 1) + stops.length) % stops.length].focus();
   });
+
+  /* ---------- downloaded popup ---------- */
+  // After a download: what the file holds, in the all-done popup's look. The close button is its only stop, so Tab stays on it.
+  const dlOv = $('#dlDone'), dlStats = $('#dlStats'), dlClose = $('#dlClose');
+  let dlFrom = null; // what had focus before the popup, to give it back on close
+  function showDownloaded(stats) {
+    hideTip();
+    dlStats.textContent = statsLine(stats);
+    dlFrom = document.activeElement;
+    dlOv.hidden = false;
+    dlClose.focus();
+  }
+  function closeDownloaded() {
+    if (dlOv.hidden) return;
+    dlOv.hidden = true;
+    if (dlFrom && dlFrom.isConnected && dlFrom.focus) dlFrom.focus();
+    dlFrom = null;
+  }
+  dlOv.addEventListener('click', (e) => { if (e.target === dlOv || e.target.closest('#dlClose')) closeDownloaded(); });
+  dlOv.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); dlClose.focus(); } });
 
   /* ---------- share the result as a picture ---------- */
   const CARD_W = 1200, CARD_H = 630, CARD_SCALE = 2; // drawn at 2x so it stays sharp when pasted
@@ -1572,18 +1625,21 @@ function savesCsv(saves) {
     return null;
   }
 
-  /** Every save as one CSV file. Resolves to downloaded | empty | dlfail, or null when the viewer declined the download. */
+  /** Every save as one CSV file. Resolves to downloaded | empty | dlfail, or null when the viewer declined the download.
+   *  After 'downloaded', dlTotals holds the counts for the popup. */
+  let dlTotals = null;
   async function downloadSaves() {
     const db = await useDb();
     if (!db) return 'dlfail';
-    let csv;
-    try { csv = savesCsv(await readSaves(db)); } catch (_) { return 'dlfail'; }
+    let csv, saves;
+    try { saves = await readSaves(db); csv = savesCsv(saves); } catch (_) { return 'dlfail'; }
     if (!csv) return 'empty';
     try {
       const dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null;
       if (!dl) return 'dlfail';
       const name = 'assignment-saves-' + stamp(new Date()).slice(0, 10) + '.csv';
       await dl.save({ filename: name, data: new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }) }); // the BOM lets Excel read accents
+      dlTotals = savesStats(saves);
       return 'downloaded';
     } catch (err) {
       return err && err.code === 'declined' ? null : 'dlfail';
@@ -1623,6 +1679,13 @@ function savesCsv(saves) {
     (document.activeElement === againYes ? againNo : againYes).focus();
   });
 
+  /** Downloads, shows the result on the button, and on success opens the popup with what the file holds. */
+  async function runDownload() {
+    const kind = await downloadSaves();
+    flashSave(kind);
+    if (kind === 'downloaded') showDownloaded(dlTotals);
+  }
+
   /* No Shift on a touch screen: the menu has a download button instead (shown only where there is no hover). */
   const dlBtn = $('#dlSaves');
   dlBtn.innerHTML = icon('download', 17);
@@ -1630,7 +1693,7 @@ function savesCsv(saves) {
     if (saveBusy) return;
     setMenu(false);
     saveBusy = true;
-    try { flashSave(await downloadSaves()); } finally { saveBusy = false; }
+    try { await runDownload(); } finally { saveBusy = false; }
   });
 
   sav.addEventListener('mousedown', (e) => { if (e.shiftKey) e.preventDefault(); }); // a Shift-click must not select text
@@ -1638,7 +1701,7 @@ function savesCsv(saves) {
     if (closeAgain()) return;
     if (saveBusy || (!e.shiftKey && sav.classList.contains('off'))) return;
     saveBusy = true;
-    try { flashSave(await (e.shiftKey ? downloadSaves() : saveList())); } finally { saveBusy = false; }
+    try { if (e.shiftKey) await runDownload(); else flashSave(await saveList()); } finally { saveBusy = false; }
   });
 
   const watchShift = (e) => { shiftHeld = e.shiftKey; syncSave(); };
@@ -1672,6 +1735,7 @@ function savesCsv(saves) {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     closeDone();
+    closeDownloaded();
     if (!menuPop.hidden) setMenu(false, true);
     if (pending) cancelPending();
     if (armed) disarm();

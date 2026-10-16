@@ -301,8 +301,8 @@ test('with no share sheet or clipboard, share saves the picture as a PNG downloa
 });
 
 test('save: each click adds a save to the database; repeats are asked about; Shift-click downloads every save as one CSV', async () => {
-  await seed([R('a', 'Read ch. 4', 45, { subject: 'Biology' }), R('b', 'Essay', 90)]);
-  const HEAD = 'Saved,Status,Assignment,Subject,Due,Type,Minutes,Start,End,ID\n';
+  await seed([R('a', 'Read ch. 4', 45, { subject: 'Biology', status: 2 }), R('b', 'Essay', 90, { status: 2 })]);
+  const HEAD = 'Saved,Assignment,Subject,Due,Type,Minutes,Start,End,ID\n';
   const kept = async () => (await db.sql`SELECT path, data FROM docs WHERE path LIKE 'saves/%' ORDER BY path`);
   const tip = (page) => page.evaluate(() => { const t = document.querySelector('#tip'); return t.classList.contains('show') ? t.textContent : null; });
   let downloads = 0;
@@ -320,6 +320,9 @@ test('save: each click adds a save to the database; repeats are asked about; Shi
 
     await page.waitForTimeout(2400);
     await addRow(page, 'Lab notes', 0, 20);
+    await page.click('.row:last-child .st');
+    await page.click('.row:last-child .st'); // done
+    await page.keyboard.press('Escape'); // the all-done popup
     await page.click('#save');
     await page.waitForSelector('#again', { state: 'visible' });
     assert.deepEqual(await page.$$eval('.row.again .nmi', (els) => els.map((e) => e.value)), ['Read ch. 4', 'Essay']);
@@ -336,8 +339,9 @@ test('save: each click adds a save to the database; repeats are asked about; Shi
     assert.deepEqual([...file.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'a UTF-8 byte order mark first');
     const D = '\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d';
     assert.match(file.subarray(3).toString('utf8'), new RegExp('^' + HEAD
-      + D + ',Not started,Read ch. 4,Biology,,,45,,,a\n' + D + ',Not started,Essay,,,,90,,,b\n' + D + ',Not started,Lab notes,,,,20,,,[a-z0-9]+\n$'));
+      + D + ',Read ch. 4,Biology,,,45,,,a\n' + D + ',Essay,,,,90,,,b\n' + D + ',Lab notes,,,,20,,,[a-z0-9]+\n$'));
     assert.equal((await kept()).length, 2, 'Shift-click saves nothing');
+    assert.equal(await page.$eval('#dlStats', (e) => e.textContent), '1 day, 3 assignments, and 0 assignment types', 'the popup says what the file holds');
     assert.deepEqual(errors, [], 'nothing blocked by the site CSP');
   });
 });
@@ -368,7 +372,9 @@ test('the built page on an iPad: home-screen app tags, and the saves CSV goes to
     assert.equal(shared.length, 1);
     assert.match(shared[0].name, /^assignment-saves-\d{4}-\d\d-\d\d\.csv$/);
     assert.match(shared[0].type, /^text\/csv/);
-    assert.match(shared[0].text, /^﻿?Saved,Status,Assignment,.*\n.*,Done,Essay,/s);
+    assert.match(shared[0].text, /^﻿?Saved,Assignment,.*\n.*,Essay,/s);
+    assert.equal(await page.$eval('#dlStats', (e) => e.textContent), '1 day, 1 assignment, and 0 assignment types');
+    await page.tap('#dlClose');
     assert.equal(await page.getAttribute('#save', 'aria-label'), 'Downloaded');
     assert.equal(downloads, 0, 'no download bar on an iPad: the sheet handles it');
     await page.waitForTimeout(2400);
