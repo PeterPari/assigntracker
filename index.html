@@ -65,6 +65,19 @@ svg { display: block; flex: none; }
 .ib.on { color: var(--accent); background: var(--accent-bg); }
 .ib.warn { color: var(--st-prog); cursor: default; }
 
+/* loading: while the shared list is being read, placeholder rows stand in for it (no words, like the rest of the page).
+   They fade in after a short wait, so a fast read never flashes them; the real list and the add button appear when the read ends. */
+#skel { display: none; flex-direction: column; gap: 2px; }
+#app.loading #skel { display: flex; }
+#app.loading #list, #app.loading .add { display: none; }
+#app.loading .fill { transition: none; }
+.sk { height: 32px; border-radius: 6px; background: linear-gradient(100deg, var(--raised) 30%, var(--line-2) 50%, var(--raised) 70%) 0 0 / 300% 100%; opacity: .55; animation: skfade .25s ease .15s backwards, skshine 1.3s linear infinite; }
+.sk:nth-child(2) { animation-delay: .22s, -.15s; width: 82%; }
+.sk:nth-child(3) { animation-delay: .29s, -.3s; width: 91%; }
+.sk:nth-child(4) { animation-delay: .36s, -.45s; width: 74%; }
+@keyframes skfade { from { opacity: 0; } }
+@keyframes skshine { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
 /* hamburger menu: a small column of toggles under the hamburger */
 .mp { position: absolute; top: calc(100% - 6px); right: 32px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
 @media (hover: hover) { .mp .ib:hover { background: rgba(255, 255, 255, .08); } }
@@ -315,7 +328,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 
-<div id="app">
+<div id="app" class="loading" aria-busy="true">
   <div class="hd">
     <div class="bar" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i class="fill" id="fill"></i><b class="pct" id="pct">0%</b></div>
     <span class="ib warn" id="warn" hidden data-tip="Not saved" role="img" aria-label="Not saved"></span>
@@ -332,6 +345,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
     </div>
     <button class="ib" id="reload" type="button" data-tip="Reload" aria-label="Reload"></button>
   </div>
+  <div id="skel" aria-hidden="true"><i class="sk"></i><i class="sk"></i><i class="sk"></i><i class="sk"></i></div>
   <div id="list"></div>
   <button class="add" id="add" type="button" data-tip="Add" aria-label="Add"></button>
 </div>
@@ -1966,7 +1980,18 @@ function statsLine(t) {
     location.reload();
   });
 
+  /** Ends the loading screen: the read found a list, found nothing, or failed. */
+  function doneLoading() {
+    const app = $('#app');
+    app.classList.remove('loading');
+    app.removeAttribute('aria-busy');
+  }
+
   async function load() {
+    try { await readList(); } finally { doneLoading(); }
+  }
+
+  async function readList() {
     let db = null;
     try { db = window.claude && window.claude.use ? await window.claude.use('db') : null; } catch (_) { db = null; }
     if (!db) { setWarn(true); return; }
