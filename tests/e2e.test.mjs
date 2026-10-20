@@ -50,12 +50,12 @@ test('opens empty: 0% bar, add button, no rows', async () => {
 test('while the list is being read a loading screen shows, then the rows (or the empty list) replace it', async () => {
   for (const [initial, rows] of [[doc([R('a', 'Essay', 60)]), 1], [{}, 0], [{ 'tracker/list': null }, 0]]) {
     await withPage({ initial, init: 'window.__db.delay = 900;' }, async (page) => {
-      assert.equal(await page.locator('#skel').isVisible(), true, 'placeholder rows show while reading');
+      assert.equal(await page.locator('#loader').isVisible(), true, 'the drawing logo shows while reading');
       assert.equal(await page.locator('#list').isVisible(), false);
       assert.equal(await page.locator('#add').isVisible(), false);
       assert.equal(await page.getAttribute('#app', 'aria-busy'), 'true');
       await page.waitForTimeout(1100);
-      assert.equal(await page.locator('#skel').isVisible(), false, 'the read ended');
+      assert.equal(await page.locator('#loader').isVisible(), false, 'the read ended');
       assert.equal(await page.locator('.row').count(), rows);
       assert.equal(await page.locator('#add').isVisible(), true);
       assert.equal(await page.getAttribute('#app', 'aria-busy'), null);
@@ -66,7 +66,7 @@ test('while the list is being read a loading screen shows, then the rows (or the
 test('a list that cannot be read ends the loading screen too', async () => {
   await withPage({ init: 'window.__db.failGet = "unavailable";' }, async (page) => {
     await page.waitForTimeout(900); // one retry first
-    assert.equal(await page.locator('#skel').isVisible(), false);
+    assert.equal(await page.locator('#loader').isVisible(), false);
     assert.equal(await page.locator('#add').isVisible(), true);
   });
 });

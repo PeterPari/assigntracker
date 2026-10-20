@@ -65,18 +65,18 @@ svg { display: block; flex: none; }
 .ib.on { color: var(--accent); background: var(--accent-bg); }
 .ib.warn { color: var(--st-prog); cursor: default; }
 
-/* loading: while the shared list is being read, placeholder rows stand in for it (no words, like the rest of the page).
-   They fade in after a short wait, so a fast read never flashes them; the real list and the add button appear when the read ends. */
-#skel { display: none; flex-direction: column; gap: 2px; }
-#app.loading #skel { display: flex; }
+/* loading: while the shared list is being read, the logo (a check in a ring) draws itself over and over until the read ends (no words).
+   It appears after a short wait, so a fast read never flashes it; the real list and the add button take over when the read ends. */
+#loader { display: none; justify-content: center; padding-top: 14vh; }
+#app.loading #loader { display: flex; animation: ldin .25s ease .15s backwards; }
 #app.loading #list, #app.loading .add { display: none; }
 #app.loading .fill { transition: none; }
-.sk { height: 32px; border-radius: 6px; background: linear-gradient(100deg, var(--raised) 30%, var(--line-2) 50%, var(--raised) 70%) 0 0 / 300% 100%; opacity: .55; animation: skfade .25s ease .15s backwards, skshine 1.3s linear infinite; }
-.sk:nth-child(2) { animation-delay: .22s, -.15s; width: 82%; }
-.sk:nth-child(3) { animation-delay: .29s, -.3s; width: 91%; }
-.sk:nth-child(4) { animation-delay: .36s, -.45s; width: 74%; }
-@keyframes skfade { from { opacity: 0; } }
-@keyframes skshine { from { background-position: 100% 0; } to { background-position: 0 0; } }
+#loader svg { width: 72px; height: 72px; fill: none; stroke: var(--st-done); stroke-linecap: round; stroke-linejoin: round; }
+#loader .lr { stroke-width: 2.5; stroke-dasharray: 1; animation: ldring 1.9s cubic-bezier(.4, 0, .2, 1) infinite; }
+#loader .lc { stroke-width: 2.8; stroke-dasharray: 1; animation: ldchk 1.9s cubic-bezier(.4, 0, .2, 1) infinite; }
+@keyframes ldin { from { opacity: 0; } }
+@keyframes ldring { 0% { stroke-dashoffset: 1; opacity: 1; } 50%, 86% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes ldchk { 0%, 40% { stroke-dashoffset: 1; opacity: 1; } 68%, 86% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
 
 /* hamburger menu: a small column of toggles under the hamburger */
 .mp { position: absolute; top: calc(100% - 6px); right: 32px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
@@ -345,7 +345,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
     </div>
     <button class="ib" id="reload" type="button" data-tip="Reload" aria-label="Reload"></button>
   </div>
-  <div id="skel" aria-hidden="true"><i class="sk"></i><i class="sk"></i><i class="sk"></i><i class="sk"></i></div>
+  <div id="loader" aria-hidden="true"><svg viewBox="0 0 32 32"><circle class="lr" cx="16" cy="16" r="9" pathLength="1"/><path class="lc" d="M11.5 16.5L14.7 19.7L20.7 12.7" pathLength="1"/></svg></div>
   <div id="list"></div>
   <button class="add" id="add" type="button" data-tip="Add" aria-label="Add"></button>
 </div>
