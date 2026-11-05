@@ -940,13 +940,57 @@ function statsLine(t) {
     inp.value = v;
     if (v !== r.name) patch(id, { name: v });
     if (viaEnter) {
-      if (!(rowOf(id).mins > 0)) $('.dh', el).focus(); else inp.blur();
+      if (!dropEmpty(el)) nextField(el, 'name'); // Enter on the empty row Enter started ends the run
     }
   }
   function cancelName(el) {
     const r = rowOf(el.dataset.id), inp = $('.nmi', el);
     inp.value = r ? r.name : '';
     inp.blur();
+    dropEmpty(el);
+  }
+
+  /* ---------- Enter moves on ----------
+     Enter walks a row's fields in order: name, each shown column (subject, due date, type), then duration, passing the
+     ones already filled. Once nothing is left, a row being filled in (one + added, or one Enter started) starts the
+     next assignment; any other row just lets go. A row needs a name and a duration, so those are asked for again first. */
+  const FIELDS = [['name', '.nmi'], ['subject', '.sbi'], ['due', '.ddi'], ['type', '.tyi'], ['dur', '.dh']];
+  const blank = (r) => !!r && !r.name.trim() && !(r.mins > 0) && !r.subject && r.due == null && !r.type && !(r.subs && r.subs.length);
+  function nextField(el, from) {
+    const r = rowOf(el.dataset.id);
+    if (!r) return;
+    const at = FIELDS.findIndex(([k]) => k === from);
+    for (const [k, sel] of FIELDS.slice(at + 1)) {
+      if (k !== 'dur' && !state.cols[k]) continue;
+      const empty = k === 'dur' ? !(r.mins > 0) : k === 'due' ? r.due == null : !String(r[k] || '').trim();
+      if (empty) { if (k === 'dur') focusDur(el); else $(sel, el).focus(); return; }
+    }
+    if (!r.name.trim()) { $('.nmi', el).focus(); return; }
+    if (!(r.mins > 0)) { focusDur(el); return; }
+    if (el._fresh) { addRow(true); return; }
+    if (from === 'dur') { $('.dv', el).focus(); return; }
+    const a = document.activeElement;
+    if (a && el.contains(a)) a.blur();
+  }
+  function focusDur(el) { // the hours of an empty duration; the editor counts as open even when the cursor was already there
+    if (!el._ed) { el._ed = 'dur'; el.classList.add('ed-dur'); }
+    $('.dh', el).focus();
+  }
+  /** Focus left the row: it is no longer being filled in, and an empty row that Enter started goes away. */
+  function leftRow(el) {
+    if (!document.hasFocus()) return; // only the window lost focus (another app): the row is still being filled in
+    el._fresh = false;
+    dropEmpty(el);
+  }
+  /** Removes the row if Enter started it and nothing was put in it. True when it did. */
+  function dropEmpty(el) {
+    const r = rowOf(el.dataset.id);
+    if (!el._auto || !blank(r)) return false;
+    el._auto = el._fresh = false;
+    if (el.contains(document.activeElement)) document.activeElement.blur();
+    state.rows = removeRow(state.rows, r.id, state.chain);
+    commit();
+    return true;
   }
 
   /* ---------- subject and assignment type: plain text, may be empty ---------- */
@@ -989,11 +1033,7 @@ function statsLine(t) {
     if (!r) return;
     if (total > 0 && total !== r.mins) patch(id, { mins: total }); // 0 never replaces a real duration
     else render();
-    if (viaEnter) {
-      const r2 = rowOf(id);
-      if (!r2.name.trim()) $('.nmi', el).focus();
-      else if (r2.mins > 0) $('.dv', el).focus();
-    }
+    if (viaEnter) nextField(el, 'dur');
   }
   function cancelDur(el) {
     closeDur(el);
@@ -1407,6 +1447,7 @@ function statsLine(t) {
     const el = e.target.closest('.row');
     if (!el) return;
     const to = e.relatedTarget;
+    if (!(to && el.contains(to))) setTimeout(() => { if (!el.contains(document.activeElement)) leftRow(el); }, 0); // after this field commits
     if (e.target.matches('.sni')) commitSub(e.target, false);
     else if (e.target.matches('.nmi')) commitName(el, false);
     else if (e.target.matches('.tfi')) commitText(e.target);
@@ -1426,8 +1467,10 @@ function statsLine(t) {
     } else if (t.matches('.nmi')) {
       if (e.key === 'Enter') { e.preventDefault(); commitName(el, true); }
       else if (e.key === 'Escape') cancelName(el);
+    } else if (t.matches('.ddi')) {
+      if (e.key === 'Enter') { e.preventDefault(); nextField(el, 'due'); }
     } else if (t.matches('.tfi')) {
-      if (e.key === 'Enter') { e.preventDefault(); t.blur(); }
+      if (e.key === 'Enter') { e.preventDefault(); commitText(t); nextField(el, textField(t)); }
       else if (e.key === 'Escape') cancelText(t);
     } else if (t.closest('.de')) {
       if (e.key === 'Enter') { e.preventDefault(); commitDur(el, true); }
@@ -1491,10 +1534,11 @@ function statsLine(t) {
     if (to && !menuPop.contains(to) && to !== menuBtn) setMenu(false);
   });
 
-  function addRow() {
+  function addRow(auto) {
     const last = state.rows[state.rows.length - 1];
     if (last && !isComplete(last)) { // one unfinished row at a time
       const el = els.get(last.id);
+      el._fresh = true;
       if (!last.name.trim()) $('.nmi', el).focus(); else $('.dh', el).focus();
       return;
     }
@@ -1503,10 +1547,12 @@ function statsLine(t) {
     touched = true;
     render();
     const el = els.get(r.id);
+    el._fresh = true; // being filled in: Enter on its last field starts the next one
+    el._auto = auto === true; // started by Enter: left empty, it goes away
     el.scrollIntoView({ block: 'nearest' });
     $('.nmi', el).focus();
   }
-  addBtn.addEventListener('click', addRow);
+  addBtn.addEventListener('click', () => addRow());
 
   let armed = false, armTimer = 0;
   function arm() {

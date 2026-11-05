@@ -33,7 +33,8 @@ async function addRow(page, name, h, m) {
   if (h) await page.keyboard.type(String(h));
   await page.keyboard.press('Tab');
   if (m) await page.keyboard.type(String(m));
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter'); // the row is done: Enter starts the next one
+  await page.keyboard.press('Escape'); // ...which, left empty, goes away
 }
 
 test('opens empty: 0% bar, add button, no rows', async () => {
@@ -84,11 +85,66 @@ test('+ adds a row at the bottom; Enter moves name -> duration; row shows format
     await page.keyboard.press('Tab');
     await page.keyboard.type('30');
     await page.keyboard.press('Enter');
+    assert.equal(await page.locator('.row').count(), 3, 'Enter on the last field starts the next assignment');
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('.row:last-child .nmi')), true);
+    await page.keyboard.press('Escape'); // left empty, the new row goes away
     assert.deepEqual(await rowsText(page, '.dv'), ['30 min', '2 hrs 30 min']);
     assert.deepEqual(await names(page), ['First', 'Second']);
     await settle(page);
     const s = await saved(page);
     assert.deepEqual(s.rows.map((r) => [r.name, r.mins]), [['First', 30], ['Second', 150]]);
+  });
+});
+
+test('Enter walks name -> shown columns -> duration, then starts the next assignment; Enter on that empty one ends', async () => {
+  await withPage({}, async (page) => {
+    const active = () => page.evaluate(() => { const a = document.activeElement; return [[...document.querySelectorAll('.row')].indexOf(a.closest('.row')), ['nmi', 'sbi', 'ddi', 'tyi', 'dh'].find((c) => a.classList.contains(c)) || a.className]; });
+    for (const id of ['#colSubject', '#colDue', '#colType']) await toggle(page, id);
+    await page.click('#add');
+    await page.keyboard.type('Essay');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await active(), [0, 'sbi'], 'name -> subject');
+    await page.keyboard.type('English');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await active(), [0, 'ddi'], 'subject -> due date');
+    await page.keyboard.press('Enter'); // no date: optional, moves on
+    assert.deepEqual(await active(), [0, 'tyi'], 'due date -> type');
+    await page.keyboard.type('Homework');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await active(), [0, 'dh'], 'type -> duration');
+    await page.keyboard.type('1');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await active(), [1, 'nmi'], 'done: a new assignment starts');
+    await page.keyboard.type('Quiz');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await active(), [1, 'dh'], 'optional fields can be passed with Enter');
+    await page.keyboard.press('Enter'); // no duration yet: it is still needed
+    assert.deepEqual(await active(), [1, 'dh']);
+    await page.keyboard.type('2');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await active(), [2, 'nmi']);
+    await page.keyboard.press('Enter'); // Enter on the empty new one ends the run
+    assert.equal(await page.locator('.row').count(), 2, 'the empty row goes away');
+    assert.deepEqual(await names(page), ['Essay', 'Quiz']);
+    await settle(page);
+    assert.deepEqual((await saved(page)).rows.map((r) => [r.name, r.subject, r.type, r.mins]), [['Essay', 'English', 'Homework', 60], ['Quiz', '', '', 120]]);
+    // an existing row: Enter goes to its next empty field, and lets go when there is none
+    await page.click('.row:nth-child(2) .nm');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await active(), [1, 'sbi']);
+    await page.keyboard.type('Math');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await active(), [1, 'ddi']);
+    await page.click('.row:nth-child(1) .nm');
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await active(), [0, 'ddi'], 'filled fields are passed');
+    await page.click('.row:nth-child(1) .ct');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => document.activeElement === document.body), true, 'nothing left to fill: Enter lets go');
+    assert.equal(await page.locator('.row').count(), 2, 'an existing row does not start a new one');
   });
 });
 

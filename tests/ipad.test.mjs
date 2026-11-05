@@ -124,6 +124,8 @@ test('tap: status cycles with quick taps, the name takes the cursor, Enter moves
     await f.tap('.row:nth-child(2) .dm'); // no Tab on the on-screen keyboard: tap minutes
     await page.keyboard.type('15');
     await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('.row:nth-child(3) .nmi')), true, 'Enter on the last field starts the next one');
+    await page.keyboard.press('Enter'); // ...and Enter on that empty one ends
     assert.deepEqual(await names(page), ['Alpha beta', 'Gamma']);
     assert.equal(await page.textContent('.row:nth-child(2) .dv'), '1 hr 15 min');
     await settle(page);

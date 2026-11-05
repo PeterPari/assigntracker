@@ -58,7 +58,8 @@ async function addRow(page, name, h, m) {
   if (h) await page.keyboard.type(String(h));
   await page.keyboard.press('Tab');
   if (m) await page.keyboard.type(String(m));
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter'); // the row is done: Enter starts the next one
+  await page.keyboard.press('Escape'); // ...which, left empty, goes away
 }
 
 test('the built page is a complete document, loads under the site CSP, and reads the list once', async () => {
