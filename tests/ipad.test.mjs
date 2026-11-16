@@ -3,7 +3,7 @@
 // The shared database is mocked, as in e2e.test.mjs.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { ipad, loadPlaywright, openPage } from './harness.mjs';
+import { fingers, ipad, loadPlaywright, openPage } from './harness.mjs';
 
 const { chromium } = loadPlaywright();
 let browser;
@@ -27,32 +27,6 @@ async function withIpad(opts, fn) {
   const { ctx, page, errors } = await openPage(browser, { device: LANDSCAPE, ...opts });
   const cdp = await ctx.newCDPSession(page);
   try { await fn(page, fingers(page, cdp)); assert.deepEqual(errors, [], 'no console or page errors'); } finally { await ctx.close(); }
-}
-
-/** Touch input. tap() works on things that are on screen but invisible (opacity 0), as a finger would. */
-function fingers(page, cdp) {
-  const send = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
-  async function at(sel) {
-    const b = await page.locator(sel).first().boundingBox();
-    assert.ok(b, `${sel} has a box on screen`);
-    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-  }
-  return {
-    at,
-    async tap(sel) { const { x, y } = await at(sel); await page.touchscreen.tap(x, y); await page.waitForTimeout(40); },
-    /** Finger down on sel, held still for `hold` ms, then moved by dy in steps, then lifted. */
-    async press(sel, { dy = 0, hold = 450, steps = 10 } = {}) {
-      const { x, y } = await at(sel);
-      await send('touchStart', [{ x, y }]);
-      await page.waitForTimeout(hold);
-      for (let i = 1; i <= steps; i++) {
-        await send('touchMove', [{ x, y: y + (dy * i) / steps }]);
-        await page.waitForTimeout(16);
-      }
-      await send('touchEnd', []);
-      await page.waitForTimeout(80);
-    },
-  };
 }
 
 const names = (page) => page.$$eval('.row .nmi', (els) => els.map((e) => e.value));

@@ -1,4 +1,5 @@
 // Test helpers: wraps index.html the way the Artifact publisher does, and mocks the `db` capability.
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -95,6 +96,39 @@ export function mockDbScript(initial) {
 export function ipad(name = 'iPad Pro 11 landscape') {
   const { defaultBrowserType, ...d } = loadPlaywright().devices[name]; // eslint-disable-line no-unused-vars
   return d;
+}
+
+/** An iPhone 17 (base model) as Chromium can play it: the iPhone profile's touch screen (no hover, coarse pointer, mobile
+ *  viewport) at the iPhone 17's 402 x 874 point screen and 3x pixels. As a home-screen app the page has the whole screen. */
+export function iphone17() {
+  const { defaultBrowserType, ...d } = loadPlaywright().devices['iPhone 15']; // eslint-disable-line no-unused-vars
+  return { ...d, viewport: { width: 402, height: 874 }, screen: { width: 402, height: 874 }, deviceScaleFactor: 3 };
+}
+
+/** Touch input. tap() works on things that are on screen but invisible (opacity 0), as a finger would. */
+export function fingers(page, cdp) {
+  const send = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  async function at(sel) {
+    const b = await page.locator(sel).first().boundingBox();
+    assert.ok(b, `${sel} has a box on screen`);
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  }
+  return {
+    at,
+    async tap(sel) { const { x, y } = await at(sel); await page.touchscreen.tap(x, y); await page.waitForTimeout(40); },
+    /** Finger down on sel, held still for `hold` ms, then moved by dy in steps, then lifted. */
+    async press(sel, { dy = 0, hold = 450, steps = 10 } = {}) {
+      const { x, y } = await at(sel);
+      await send('touchStart', [{ x, y }]);
+      await page.waitForTimeout(hold);
+      for (let i = 1; i <= steps; i++) {
+        await send('touchMove', [{ x, y: y + (dy * i) / steps }]);
+        await page.waitForTimeout(16);
+      }
+      await send('touchEnd', []);
+      await page.waitForTimeout(80);
+    },
+  };
 }
 
 export async function openPage(browser, { initial, missing, now, init, device } = {}) {

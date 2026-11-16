@@ -1,6 +1,6 @@
 # Assignment Tracker
 
-A one-page assignment tracker with a shared list, a progress bar, subtasks, optional start and end times, optional subject, due date and assignment type columns, and drag to reorder. It is a single self-contained HTML file (`index.html`), published as a Claude Artifact or deployed on Netlify (see [Deploy on Netlify](#deploy-on-netlify)). Dark theme, system sans-serif. Works with a mouse on a desktop and by touch on an iPad, in Safari or as a home-screen app (see [On an iPad](#on-an-ipad)).
+A one-page assignment tracker with a shared list, a progress bar, subtasks, optional start and end times, optional subject, due date and assignment type columns, and drag to reorder. It is a single self-contained HTML file (`index.html`), published as a Claude Artifact or deployed on Netlify (see [Deploy on Netlify](#deploy-on-netlify)). Dark theme, system sans-serif. Works with a mouse on a desktop, by touch on an iPad (see [On an iPad](#on-an-ipad)) and on an iPhone (see [On an iPhone](#on-an-iphone)), in Safari or as a home-screen app.
 
 The page shows no words. Everything is an icon (the menu included) except placeholders, units (`hr`, `hrs`, `min`), clock text (`AM`, `PM`), the percentage in the progress bar, tooltips, the one message in the all-done popup, the picture that popup shares, and the question in the save popup. Tooltips appear after a long hover (800 ms).
 
@@ -156,6 +156,23 @@ A home-screen app does not keep the browser's login box (and may never show it),
 
 The tests run Chromium with Playwright's iPad profiles (touch, no hover, iPad Pro 11, iPad Mini and iPad 7th generation sizes, upright and sideways), tapping through the touch screen and sending long presses and drags as raw touch events. They do not run real Safari, so what only Safari does (its share sheet, its date picker) is covered by stand-ins.
 
+## On an iPhone
+
+Made for the iPhone 17 (base model) held upright, in Safari or as a home-screen app. The page switches to this layout on a touch screen no wider than 500px (CSS `(pointer: coarse) and (max-width: 500px)`); the desktop and the iPad are unchanged. Everything else on the iPad applies here too: the sizes, tap to show, long press to drag, the menu's download arrow, and Add to Home Screen.
+
+| What | How |
+| --- | --- |
+| Cards | Each task is a rounded card with its subject color as a strip down the left edge. The first line is the status, the name (in larger, heavier type) and, on the card last touched, the caret and the `×` at the top right. |
+| Chips | Under the name, the duration comes first, then the subject, due date and assignment type when the menu shows them, as small grey chips that wrap. With times shown, the start and end take a line of their own. Tap a chip to edit it in place, as anywhere else. An empty start is a dashed chip; an empty due date says `Due date`, since iOS draws nothing in an empty date field. |
+| Subtasks | Under the name, inside the card. |
+| Dock | `+`, save and trash sit in a row at the bottom, in reach of a thumb, on a blurred strip clear of the home indicator. `+` adds a task as the bar under the list does elsewhere. The dock steps aside while a field has the cursor (the keyboard covers that spot anyway). |
+| Header | Sticky and blurred, and in a home-screen app it covers the status bar and the Dynamic Island. |
+| Popups | The chaining question opens under the start time. The save-again question spans the screen above the dock and points at the save button. |
+| Keyboard | Return says Next on the name, subject, type and subtask fields. Durations and times use the number pad, which has no Return: the bar above the keyboard moves to the minutes, and its Done commits the edit, as tapping away does. |
+| Drag | Dragging a card down to the dock, or up to the header, scrolls the page. |
+
+`tests/phone.test.mjs` runs Chromium with an iPhone profile at the iPhone 17's size (402 × 874, 3x), touching through the touch screen and sending long presses and drags as raw touch events. It does not run real Safari.
+
 ## Drag and drop
 
 Vanilla Pointer Events, no library. The list is small and uniform, so about 60 lines cover it: no download, nothing blocked by the artifact CSP, and full control over the click-versus-drag line so inline editing keeps working. The same code drags tasks and the subtasks inside one task; items may differ in height (a task with its subtasks open is taller), and one passes another once its leading edge reaches the other's middle. Rows slide aside while you drag, the page scrolls near the window edge, and the drop animates with FLIP. A mouse drags after 5px of movement; a finger or pencil after a 0.3 s hold, and once it drags, its `touchmove`s are cancelled so the page does not scroll under it.
@@ -183,6 +200,7 @@ tests/netlify-harness.mjs   embedded Postgres and a small server for the two fil
 tests/auth.test.mjs         the site password: the Basic Auth check, the session cookie, and the edge function that applies them
 tests/pwa.test.mjs          the manifest and icons, and that the files a browser fetches to install the app are served without the password
 tests/ipad.test.mjs         Chromium as an iPad: touch sizes, tap to show, long-press drag, upright layout, the menu download
+tests/phone.test.mjs        Chromium as an iPhone 17: the card layout, the dock, tap to show, long-press drag, the popups on a narrow screen
 tests/login.test.mjs        the password form behind the 401 and the session cookie, in Chromium as an iPad home-screen app
 ```
 
