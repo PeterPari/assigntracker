@@ -1183,7 +1183,7 @@ test('tooltips: nothing on a quick hover, short text after a long hover, every i
   });
 });
 
-test('only allowed text is visible: placeholders, units, clock text, percent, tooltips', async () => {
+test('only allowed text is visible: placeholders, units, clock text, percent, the menu version, tooltips', async () => {
   const rows = [R('a', 'Essay', 150, { start: H(9) }), R('b', 'Quiz', 60, { status: 2 }), R('c', 'Lab', 45)];
   await withPage({ initial: doc(rows, { times: true }) }, async (page) => {
     await page.click('.row:nth-child(2) .sc');
@@ -1201,7 +1201,7 @@ test('only allowed text is visible: placeholders, units, clock text, percent, to
         if (!t || p.closest('script, style')) continue;
         const vis = p.getClientRects().length > 0 && getComputedStyle(p).visibility !== 'hidden';
         if (!vis) continue;
-        if (/^(\d+ (hrs?|min)( \d+ min)?|\d{1,2}:\d\d (AM|PM)|AM|PM|hr|min|:|\d+%)$/.test(t)) continue;
+        if (/^(\d+ (hrs?|min)( \d+ min)?|\d{1,2}:\d\d (AM|PM)|AM|PM|hr|min|:|\d+%|v\d+\.\d+\.\d+)$/.test(t)) continue;
         out.push(t);
       }
       return out;
@@ -2117,6 +2117,15 @@ test('menu: five icon-only toggles, each with a tip; chaining only while times a
     const hb = await box('#menu'), pb = await box('#menuPop');
     assert.ok(pb.y > hb.y + hb.height - 1, 'the drop-down sits under the hamburger');
     assert.ok(Math.abs((pb.x + pb.width) - (hb.x + hb.width)) <= 6, 'and lines up with its right edge');
+  });
+});
+
+test('menu: the version sits quietly at its foot', async () => {
+  await withPage({}, async (page) => {
+    await page.click('#menu');
+    assert.equal(await page.locator('#ver').isVisible(), true);
+    assert.match((await page.textContent('#ver')).trim(), /^v\d+\.\d+\.\d+$/);
+    assert.equal(await page.$eval('#menuPop', (m) => m.lastElementChild.id), 'ver', 'last in the menu');
   });
 });
 
