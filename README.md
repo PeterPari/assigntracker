@@ -165,8 +165,8 @@ Made for the iPhone 17 (base model) held upright, in Safari or as a home-screen 
 | Cards | Each task is a rounded card with its subject color as a strip down the left edge. The first line is the status, the name (in larger, heavier type) and, on the card last touched, the caret and the `×` at the top right. |
 | Chips | Under the name, the duration comes first, then the subject, due date and assignment type when the menu shows them, as small grey chips that wrap. With times shown, the start and end take a line of their own. Tap a chip to edit it in place, as anywhere else. An empty start is a dashed chip; an empty due date says `Due date`, since iOS draws nothing in an empty date field. |
 | Subtasks | Under the name, inside the card. |
-| Dock | `+`, save and trash sit in a row at the bottom, in reach of a thumb, on a blurred strip clear of the home indicator. `+` adds a task as the bar under the list does elsewhere. The dock steps aside while a field has the cursor (the keyboard covers that spot anyway). |
-| Header | Sticky and blurred, and in a home-screen app it covers the status bar and the Dynamic Island. |
+| Dock | `+`, save and trash sit in a row at the bottom, in reach of a thumb, on a solid strip clear of the home indicator. `+` adds a task as the bar under the list does elsewhere. The dock steps aside while a field has the cursor (the keyboard covers that spot anyway). |
+| Header | Sticky and solid (no blur, which would redraw on every scroll frame), and in a home-screen app it covers the status bar and the Dynamic Island. |
 | Popups | The chaining question opens under the start time. The save-again question spans the screen above the dock and points at the save button. |
 | Keyboard | Return says Next on the name, subject, type and subtask fields. Durations and times use the number pad, which has no Return: the bar above the keyboard moves to the minutes, and its Done commits the edit, as tapping away does. |
 | Drag | Dragging a card down to the dock, or up to the header, scrolls the page. |

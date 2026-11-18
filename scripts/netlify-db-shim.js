@@ -27,6 +27,7 @@
   }
 
   // A collection query. The function returns the whole collection, and the filters, order and limit apply here.
+  // shortcut: every page refetches the whole collection; fine below ~1000 saves, add server-side after/limit past that.
   const OPS = { '==': (a, b) => a === b, '!=': (a, b) => a !== b, '<': (a, b) => a < b, '<=': (a, b) => a <= b, '>': (a, b) => a > b, '>=': (a, b) => a >= b };
   const query = (path, q) => ({
     where: (field, op, value) => {

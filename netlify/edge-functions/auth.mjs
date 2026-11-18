@@ -10,9 +10,9 @@ export default async (req, context) => {
   if (isPublicPath(pathname)) return context.next();
   const password = Netlify.env.get('SITE_PASSWORD');
   if (pathname === LOGIN_PATH) return login(req, password);
+  if (await hasSession(req, password)) return context.next();
   const denied = await checkAuth(req, password);
   if (denied) return denied;
-  if (await hasSession(req, password)) return context.next();
   // In through the login box: keep a cookie too, so an app that forgets that login stays signed in.
   return withCookie(await context.next(), await sessionCookie(password));
 };

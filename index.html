@@ -410,10 +410,6 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
   .agq { flex: 1; margin-right: 4px; line-height: 1.3; }
   .ag::after { right: 82px; } /* over the save button's middle */
 
-  @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-    .hd, body::after { background: rgba(19, 21, 26, .8); -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%); }
-  }
-
   /* a press shows (no hover on a phone) */
   .st:active, .sst:active, .ex:active, .rm:active, .srm:active, .ib:active, .pop > :active, .ag button:active { background: rgba(255, 255, 255, .08); }
   .add:active, .sav:active, .clr:active, .sadd:active { background: var(--raised); transform: scale(.96); }
@@ -440,7 +436,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
       <span class="msep tonly" aria-hidden="true"></span>
       <button class="ib tonly" id="dlSaves" type="button" data-tip="Download saves" aria-label="Download saves"></button>
       <span class="msep" aria-hidden="true"></span>
-      <span class="mver" id="ver" aria-label="Version 1.2.0">v1.2.0</span>
+      <span class="mver" id="ver" aria-label="Version 1.2.2">v1.2.2</span>
     </div>
     <button class="ib" id="reload" type="button" data-tip="Reload" aria-label="Reload"></button>
   </div>
@@ -849,6 +845,7 @@ function statsLine(t) {
   const list = $('#list'), bar = $('#bar'), fill = $('#fill'), pctEl = $('#pct');
   const tTimes = $('#times'), tChain = $('#chain'), tWarn = $('#warn'), addBtn = $('#add'), clr = $('#clear'), sav = $('#save'), saveLive = $('#saveStatus');
   addBtn.innerHTML = icon('plus', 18);
+  tTimes.innerHTML = icon('clock', 17);
   tWarn.innerHTML = icon('alert', 17);
   $('#reload').innerHTML = icon('reload', 17);
   $('#menu').innerHTML = icon('menu', 17);
@@ -902,11 +899,11 @@ function statsLine(t) {
     <button class="ex" type="button" aria-expanded="false">${icon('chev', 15)}</button>
     </div>
     <div class="subs"><div class="sbl"></div><button class="sadd" type="button" data-tip="Add subtask" aria-label="Add subtask">${icon('plus', 13)}</button></div>
-    <button class="rm" type="button" data-tip="Delete" aria-label="Delete">${icon('x', 15)}</button>`;
+    <button class="rm" type="button" data-tip="Delete" aria-label="Delete">${icon('x', 15)}</button>`.replace(/>\s+</g, '><'); // whitespace between tags is a third of a row's DOM nodes and renders nothing (flex/grid)
   const SUB_HTML = `
     <button class="sst" type="button"></button>
     <div class="snm"><input class="sni" type="text" maxlength="200" placeholder="Subtask" autocomplete="off" spellcheck="false" enterkeyhint="next" aria-label="Subtask"></div>
-    <button class="srm" type="button" data-tip="Delete subtask" aria-label="Delete subtask">${icon('x', 13)}</button>`;
+    <button class="srm" type="button" data-tip="Delete subtask" aria-label="Delete subtask">${icon('x', 13)}</button>`.trim().replace(/>\s+</g, '><');
 
   function makeRow(id) {
     const el = document.createElement('div');
@@ -1006,13 +1003,12 @@ function statsLine(t) {
     fill.style.width = pct + '%';
     pctEl.textContent = pct + '%';
     bar.setAttribute('aria-valuenow', pct);
-    tTimes.innerHTML = icon('clock', 17);
     tTimes.classList.toggle('on', state.times);
     tTimes.setAttribute('aria-pressed', String(state.times));
     tTimes.dataset.tip = state.times ? 'Hide times' : 'Show times';
     tTimes.setAttribute('aria-label', tTimes.dataset.tip);
     tChain.hidden = !state.times;
-    tChain.innerHTML = icon(state.chain ? 'link' : 'unlink', 17);
+    if (tChain._on !== state.chain) { tChain._on = state.chain; tChain.innerHTML = icon(state.chain ? 'link' : 'unlink', 17); }
     tChain.classList.toggle('on', state.chain);
     tChain.setAttribute('aria-pressed', String(state.chain));
     tChain.dataset.tip = state.chain ? 'Chaining on' : 'Chaining off';
@@ -1852,7 +1848,7 @@ function statsLine(t) {
   dlBtn.innerHTML = icon('download', 17);
   dlBtn.addEventListener('click', async () => {
     if (saveBusy) return;
-    setMenu(false);
+    setMenu(false, true); // focus to the hamburger, so closing the popup has somewhere to return it
     saveBusy = true;
     try { await runDownload(); } finally { saveBusy = false; }
   });
