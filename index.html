@@ -1852,7 +1852,7 @@ function statsLine(t) {
   dlBtn.innerHTML = icon('download', 17);
   dlBtn.addEventListener('click', async () => {
     if (saveBusy) return;
-    setMenu(false);
+    setMenu(false, true); // focus to the hamburger, so closing the popup has somewhere to return it
     saveBusy = true;
     try { await runDownload(); } finally { saveBusy = false; }
   });

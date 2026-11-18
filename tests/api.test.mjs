@@ -112,6 +112,12 @@ test('bad bodies are 400 and never overwrite the stored list', async () => {
   assert.deepEqual((await (await get()).json()).data, LIST);
 });
 
+test('the text \\u0000 typed by hand (an escaped backslash, not a NUL) saves', async () => {
+  const data = { name: 'a\\u0000b' };
+  assert.equal((await put(JSON.stringify(data))).status, 200);
+  assert.deepEqual((await (await get()).json()).data, data);
+});
+
 test('a body over the limit is 413, by header or by actual size', async () => {
   await put(LIST);
   const big = JSON.stringify({ pad: 'x'.repeat(MAX_BYTES) });

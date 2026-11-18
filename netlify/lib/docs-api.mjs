@@ -48,7 +48,7 @@ export function createHandler(getDb) {
       let data;
       try { data = JSON.parse(text); } catch { return reply(400, { error: 'body must be JSON' }); }
       if (!data || typeof data !== 'object' || Array.isArray(data)) return reply(400, { error: 'body must be a JSON object' });
-      if (text.includes('\\u0000')) return reply(400, { error: 'body has a NUL character' }); // Postgres jsonb cannot store it
+      if (text.replace(/\\\\/g, '').includes('\\u0000')) return reply(400, { error: 'body has a NUL character' }); // Postgres jsonb cannot store it
       await getDb().sql`
         INSERT INTO docs (path, data, updated_at) VALUES (${path}, ${text}::jsonb, now())
         ON CONFLICT (path) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`;
